@@ -1,0 +1,52 @@
+const STORAGE_KEY = 'expenseTracker';
+
+const DEFAULT_DATA = {
+  expenses: [],
+  categories: [
+    {
+      "id": "abc123",
+      "name": "Food & Dining",
+      "color": "#f59e0b",
+      "subcategories": ["Groceries", "Restaurants", "Snacks", "Chai"]
+    }
+  ],
+  settings: { theme: 'light' }
+};
+
+function loadData() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return JSON.parse(JSON.stringify(DEFAULT_DATA));
+
+    const parsed = JSON.parse(raw);
+
+    if (!Array.isArray(parsed.expenses)) parsed.expenses = [];
+    if (!Array.isArray(parsed.categories)) parsed.categories = [];
+    if (!parsed.settings || typeof parsed.settings !== 'object') {
+      parsed.settings = { theme: 'light' };
+    }
+    if (typeof parsed.settings.theme !== 'string') {
+      parsed.settings.theme = 'light';
+    }
+
+    return parsed;
+  } catch (error) {
+    return JSON.parse(JSON.stringify(DEFAULT_DATA));
+  }
+}
+
+function saveData(data) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  } catch (error) {
+    console.error('Failed to save expense data:', error);
+  }
+}
+
+function resetData() {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch (error) {
+    console.error('Failed to reset expense data:', error);
+  }
+}

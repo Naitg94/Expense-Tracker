@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Expense Tracker</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js" defer></script>
+  <script src="script.js" defer></script>
+</head>
+<body>
+
+          <header class="app-header" id="appHeader">
+    <h1 class="app-title" id="appTitle">Expense Tracker</h1>
+    <nav class="header-nav" aria-label="Section navigation">
+      <a href="#expenseFormSection" class="nav-link active" data-target="expenseFormSection">Add Expense</a>
+      <a href="#categorySection" class="nav-link" data-target="categorySection">Categories</a>
+      <a href="#dashboardSection" class="nav-link" data-target="dashboardSection">Dashboard</a>
+      <a href="#chartsSection" class="nav-link" data-target="chartsSection">Charts</a>
+      <a href="#insightsSection" class="nav-link" data-target="insightsSection">Insights</a>
+      <a href="#heatmapSection" class="nav-link" data-target="heatmapSection">Heatmap</a>
+      <a href="#expenseListSection" class="nav-link" data-target="expenseListSection">All Expenses</a>
+    </nav>
+    <div class="header-separator"></div>
+    <button class="dark-mode-toggle" id="darkModeToggle" type="button" aria-label="Toggle dark mode">
+      <span class="toggle-icon" id="toggleIcon">&#9790;</span>
+    </button>
+  </header>
+
+  <main class="app-main" id="appMain">
+
+    <!-- Expense Form Section -->
+    <section class="section expense-form-section" id="expenseFormSection" aria-labelledby="expenseFormTitle">
+      <h2 class="section-title" id="expenseFormTitle">Add Expense</h2>
+      <form class="expense-form" id="expenseForm" novalidate>
+        <div class="form-group">
+          <label for="expenseAmount">Amount</label>
+          <input type="number" id="expenseAmount" class="form-input" placeholder="0.00" min="0.01" step="0.01" required>
+        </div>
+        <div class="form-group">
+          <label for="expenseCategory">Category</label>
+          <select id="expenseCategory" class="form-input" required>
+            <option value="" disabled selected>Select category</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="expenseSubcategory">Subcategory</label>
+          <input type="text" id="expenseSubcategory" class="form-input" placeholder="e.g. Groceries, Rent">
+        </div>
+        <div class="form-group">
+          <label for="expenseDate">Date</label>
+          <input type="date" id="expenseDate" class="form-input" required>
+        </div>
+        <button type="submit" class="btn btn-primary" id="addExpenseBtn">Add Expense</button>
+      </form>
+    </section>
+
+    <!-- Category Management Section -->
+    <section class="section category-section" id="categorySection" aria-labelledby="categoryTitle">
+      <h2 class="section-title" id="categoryTitle">Manage Categories</h2>
+      <div class="category-form" id="categoryForm">
+        <div class="form-group">
+          <label for="categoryNameInput">Category Name</label>
+          <input type="text" id="categoryNameInput" class="form-input" placeholder="e.g. Food, Transport">
+        </div>
+        <div class="form-group">
+          <label for="categoryColorPicker">Color</label>
+          <input type="color" id="categoryColorPicker" class="form-input color-input" value="#4f46e5">
+        </div>
+        <button type="button" class="btn btn-secondary" id="addCategoryBtn">Add Category</button>
+      </div>
+      <ul class="category-list" id="categoryList" aria-label="List of categories">
+        <!-- Dynamically populated -->
+      </ul>
+    </section>
+
+    <!-- Dashboard Section -->
+    <section class="section dashboard-section" id="dashboardSection" aria-labelledby="dashboardTitle">
+      <h2 class="section-title" id="dashboardTitle">Dashboard</h2>
+      <div class="dashboard-cards" id="dashboardCards">
+        <div class="dash-card" id="cardDaily">
+          <span class="dash-card-label">Today</span>
+          <span class="dash-card-amount" id="amountDaily">$0.00</span>
+        </div>
+        <div class="dash-card" id="cardWeekly">
+          <span class="dash-card-label">This Week</span>
+          <span class="dash-card-amount" id="amountWeekly">$0.00</span>
+        </div>
+        <div class="dash-card" id="cardMonthly">
+          <span class="dash-card-label">This Month</span>
+          <span class="dash-card-amount" id="amountMonthly">$0.00</span>
+        </div>
+        <div class="dash-card" id="cardYearly">
+          <span class="dash-card-label">This Year</span>
+          <span class="dash-card-amount" id="amountYearly">$0.00</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Charts Section -->
+    <section class="section charts-section" id="chartsSection" aria-labelledby="chartsTitle">
+      <h2 class="section-title" id="chartsTitle">Charts</h2>
+      <div class="charts-grid" id="chartsGrid">
+        <div class="chart-container" id="pieChartContainer">
+          <h3 class="chart-label">Spending by Category</h3>
+          <canvas id="pieChart"></canvas>
+        </div>
+        <div class="chart-container" id="lineChartContainer">
+          <h3 class="chart-label">Spending Over Time</h3>
+          <canvas id="lineChart"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- Insights Section -->
+    <section class="section insights-section" id="insightsSection" aria-labelledby="insightsTitle">
+      <h2 class="section-title" id="insightsTitle">Insights</h2>
+      <div class="insights-container" id="insightsContainer">
+        <!-- Dynamically populated insight messages -->
+      </div>
+    </section>
+
+    <!-- Heatmap Section -->
+    <section class="section heatmap-section" id="heatmapSection" aria-labelledby="heatmapTitle">
+      <h2 class="section-title" id="heatmapTitle">Spending Heatmap</h2>
+      <div class="heatmap-grid" id="heatmapGrid">
+        <!-- Dynamically populated heatmap cells -->
+      </div>
+      <div class="heatmap-legend" id="heatmapLegend">
+        <span class="legend-label">Less</span>
+        <div class="legend-cells">
+          <span class="legend-cell level-0"></span>
+          <span class="legend-cell level-1"></span>
+          <span class="legend-cell level-2"></span>
+          <span class="legend-cell level-3"></span>
+          <span class="legend-cell level-4"></span>
+        </div>
+        <span class="legend-label">More</span>
+      </div>
+    </section>
+
+    <!-- Expense List Section -->
+    <section class="section expense-list-section" id="expenseListSection" aria-labelledby="expenseListTitle">
+      <h2 class="section-title" id="expenseListTitle">All Expenses</h2>
+      <div class="expense-list-wrapper" id="expenseListWrapper">
+        <div class="expense-list-header" id="expenseListHeader">
+          <div class="expense-filter" id="expenseFilter">
+            <label for="filterCategory" class="sr-only">Filter by category</label>
+            <select id="filterCategory" class="form-input">
+              <option value="all">All Categories</option>
+            </select>
+          </div>
+          <button type="button" class="btn btn-export" id="exportPdfBtn">Export PDF</button>
+        </div>
+        <div class="expense-table-wrapper" id="expenseTableWrapper">
+          <table class="expense-table" id="expenseTable">
+            <thead>
+              <tr>
+                <th scope="col">Date</th>
+                <th scope="col">Category</th>
+                <th scope="col">Subcategory</th>
+                <th scope="col">Amount</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="expenseTableBody">
+              <!-- Dynamically populated -->
+            </tbody>
+          </table>
+        </div>
+        <div class="expense-cards" id="expenseCards">
+          <!-- Mobile card view, dynamically populated -->
+        </div>
+        <div class="empty-state" id="emptyState">
+          <p>No expenses recorded yet. Add your first expense above.</p>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="app-footer" id="appFooter">
+    <p class="footer-text">Personal Expense Tracker &mdash; All data stored locally in your browser.</p>
+  </footer>
+
+      
+</body>
+</html>
