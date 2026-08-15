@@ -959,20 +959,9 @@ select.form-input {
 
 .nav-link.active {
   color: var(--accent);
-  border-bottom-color: var(--accent);
+  border-bottom-color: transparent;
 }
 
-.nav-link.active::after {
-  content: '';
-  position: absolute;
-  bottom: -1px;
-  left: 13px;
-  right: 13px;
-  height: 2px;
-  background-color: var(--accent);
-  border-radius: 1px;
-  box-shadow: 0 0 8px var(--accent-glow), 0 0 16px var(--accent-glow);
-}
 
 .header-separator {
   width: 1px;
@@ -1039,10 +1028,7 @@ select.form-input {
     height: 50px;
   }
 
-  .nav-link.active::after {
-    left: 16px;
-    right: 16px;
-  }
+
 
   .header-nav {
     gap: 0;
