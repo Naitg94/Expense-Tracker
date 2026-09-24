@@ -10,6 +10,7 @@
   let editingCatId = null;
   let pieChartInstance = null;
   let lineChartInstance = null;
+  let pendingImportData = null;
   let dom = {};
 
   /* ================================================================
@@ -57,8 +58,6 @@
 
   function sumArr(arr) { return arr.reduce(function (s, e) { return s + e.amount; }, 0); }
 
-  // Look up category by ID — this is the single source of truth.
-  // Every render function calls this, so edits propagate everywhere automatically.
   function getCat(id) {
     return data.categories.find(function (c) { return c.id === id; }) || null;
   }
@@ -67,7 +66,6 @@
 
   /* ================================================================
      NAME → COLOR GENERATOR
-     Deterministic: same name always gives same vibrant color.
      ================================================================ */
   function nameToColor(name) {
     if (!name || !name.trim()) return '#6366f1';
@@ -146,42 +144,26 @@
 
   /* ================================================================
      CATEGORY MANAGEMENT
-     Add new or update existing. All expenses referencing this category
-     (by ID) automatically reflect the new name/color on next render
-     because every render uses getCat(id) to look up current values.
      ================================================================ */
   function addCategory(name, color) {
     var trimmed = name.trim();
     if (!trimmed) { showToast('Category name cannot be empty', 'error'); return false; }
 
-    // Block duplicate names, but allow if we're editing the same category
     var exists = data.categories.some(function (c) {
       return c.id !== editingCatId && c.name.toLowerCase() === trimmed.toLowerCase();
     });
     if (exists) { showToast('Category already exists', 'error'); return false; }
 
     if (editingCatId) {
-      // ── UPDATE EXISTING ──
       var cat = getCat(editingCatId);
       if (cat) {
         cat.name = trimmed;
         cat.color = color;
         saveData();
-
-        // If user is also editing an expense that uses this category,
-        // update the form to show the new name
-        if (editingId) {
-          var exp = data.expenses.find(function (e) { return e.id === editingId; });
-          if (exp && exp.categoryId === editingCatId) {
-            // Dropdown will be refreshed by refreshAll(), preserving the selected ID
-          }
-        }
-
         showToast('Category "' + trimmed + '" updated!', 'success');
       }
       cancelCategoryEdit();
     } else {
-      // ── ADD NEW ──
       data.categories.push({ id: uid(), name: trimmed, color: color, subcategories: [] });
       saveData();
       showToast('Category "' + trimmed + '" added!', 'success');
@@ -197,7 +179,6 @@
     var cat = getCat(id);
     var name = cat ? cat.name : 'Category';
     data.categories = data.categories.filter(function (c) { return c.id !== id; });
-    // Remove all expenses that used this category
     var removedCount = data.expenses.filter(function (e) { return e.categoryId === id; }).length;
     data.expenses = data.expenses.filter(function (e) { return e.categoryId !== id; });
     if (editingCatId === id) cancelCategoryEdit();
@@ -206,14 +187,9 @@
     showToast(name + ' removed' + (removedCount > 0 ? ' along with ' + removedCount + ' expense(s)' : ''), 'success');
   }
 
-  /* ================================================================
-     CATEGORY EDIT MODE UI
-     ================================================================ */
   function startCategoryEdit(id) {
     var cat = getCat(id);
     if (!cat) return;
-
-    // If already editing another, cancel first
     if (editingCatId && editingCatId !== id) cancelCategoryEdit();
 
     editingCatId = id;
@@ -261,10 +237,8 @@
     });
   }
 
-  // As user types a NEW category name, auto-pick color.
-  // Disabled during edit mode so manual color choice isn't overridden.
   function handleCategoryNameInput() {
-    if (editingCatId) return; // Don't override while editing
+    if (editingCatId) return;
     var name = dom.categoryNameInput.value;
     dom.categoryColorPicker.value = colorToHex(nameToColor(name));
   }
@@ -292,7 +266,6 @@
     var cat = getCat(categoryId);
     if (!cat) return;
     cat.subcategories = cat.subcategories.filter(function (s) { return s.toLowerCase() !== subName.toLowerCase(); });
-    // Clear subcategory from expenses that used it
     data.expenses.forEach(function (e) {
       if (e.categoryId === categoryId && e.subcategory && e.subcategory.toLowerCase() === subName.toLowerCase()) {
         e.subcategory = '';
@@ -328,9 +301,6 @@
     });
   }
 
-  /* ================================================================
-     SUBCATEGORY MANAGER UI (built dynamically)
-     ================================================================ */
   function buildSubcategoryManager() {
     var section = $('categorySection');
     var wrapper = document.createElement('div');
@@ -456,11 +426,6 @@
     container.appendChild(tagWrap);
   }
 
-  /* ================================================================
-     CATEGORY DROPDOWN + BADGE RENDER
-     Every render here uses getCat(id) so name/color changes
-     are always reflected immediately.
-     ================================================================ */
   function renderCategories() {
     var list = dom.categoryList;
     list.innerHTML = '';
@@ -504,35 +469,32 @@
   }
 
   function updateCategoryDropdowns() {
-    // Expense form category select — preserves current selection by ID
     var sel = dom.expenseCategory;
     var curVal = sel.value;
     sel.innerHTML = '<option value="" disabled selected>Select category</option>';
     data.categories.forEach(function (cat) {
       var opt = document.createElement('option');
       opt.value = cat.id;
-      opt.textContent = cat.name; // Shows updated name
+      opt.textContent = cat.name;
       sel.appendChild(opt);
     });
     var addOpt = document.createElement('option');
     addOpt.value = ADD_NEW_CAT();
     addOpt.textContent = '\u2795 Add new category...';
     sel.appendChild(addOpt);
-    // Restore selection — even if category was renamed, ID stays the same
     if (curVal && (data.categories.some(function (c) { return c.id === curVal; }) || curVal === ADD_NEW_CAT())) {
       sel.value = curVal;
     } else {
       sel.value = '';
     }
 
-    // Filter dropdown — preserves current selection by ID
     var filterSel = dom.filterCategory;
     var filterVal = filterSel.value;
     filterSel.innerHTML = '<option value="all">All Categories</option>';
     data.categories.forEach(function (cat) {
       var opt = document.createElement('option');
       opt.value = cat.id;
-      opt.textContent = cat.name; // Shows updated name
+      opt.textContent = cat.name;
       filterSel.appendChild(opt);
     });
     if (filterVal === 'all' || data.categories.some(function (c) { return c.id === filterVal; })) {
@@ -541,23 +503,63 @@
       filterSel.value = 'all';
     }
 
-    // Subcategory manager dropdown
     if (dom.subCatCategorySelect) renderSubcategoryManager();
   }
 
   /* ================================================================
-     EXPENSE MANAGEMENT
+     EXPENSE NOTE BOX MANAGEMENT
      ================================================================ */
-  function addExpense(amount, categoryId, subcategory, date) {
+  function expandNoteBox() {
+    dom.noteContainer.classList.remove('collapsed');
+    dom.toggleNoteBtn.setAttribute('aria-expanded', 'true');
+    var txt = dom.toggleNoteBtn.querySelector('.note-btn-text');
+    if (txt) txt.textContent = 'Remove Note';
+  }
+
+  function collapseNoteBox() {
+    dom.noteContainer.classList.add('collapsed');
+    dom.toggleNoteBtn.setAttribute('aria-expanded', 'false');
+    var txt = dom.toggleNoteBtn.querySelector('.note-btn-text');
+    if (txt) txt.textContent = 'Add Note';
+    dom.expenseNote.value = '';
+    updateNoteCharCounter();
+  }
+
+  function toggleNoteBox() {
+    if (dom.noteContainer.classList.contains('collapsed')) {
+      expandNoteBox();
+      dom.expenseNote.focus();
+    } else {
+      collapseNoteBox();
+    }
+  }
+
+  function updateNoteCharCounter() {
+    var count = dom.expenseNote.value.length;
+    dom.noteCharCounter.textContent = count + '/500';
+  }
+
+  /* ================================================================
+     EXPENSE MANAGEMENT (CRUD)
+     ================================================================ */
+  function addExpense(amount, categoryId, subcategory, date, comment) {
     saveSubcategoryFromExpense(categoryId, subcategory);
-    data.expenses.push({
-      id: uid(), amount: parseFloat(amount), categoryId: categoryId,
-      subcategory: subcategory.trim(), date: date, createdAt: new Date().toISOString()
-    });
+    var expObj = {
+      id: uid(),
+      amount: parseFloat(amount),
+      categoryId: categoryId,
+      subcategory: subcategory.trim(),
+      date: date,
+      createdAt: new Date().toISOString()
+    };
+    if (comment && comment.trim()) {
+      expObj.comment = comment.trim();
+    }
+    data.expenses.push(expObj);
     saveData();
   }
 
-  function updateExpense(id, amount, categoryId, subcategory, date) {
+  function updateExpense(id, amount, categoryId, subcategory, date, comment) {
     saveSubcategoryFromExpense(categoryId, subcategory);
     var idx = data.expenses.findIndex(function (e) { return e.id === id; });
     if (idx !== -1) {
@@ -565,6 +567,11 @@
       data.expenses[idx].categoryId = categoryId;
       data.expenses[idx].subcategory = subcategory.trim();
       data.expenses[idx].date = date;
+      if (comment && comment.trim()) {
+        data.expenses[idx].comment = comment.trim();
+      } else {
+        delete data.expenses[idx].comment;
+      }
       saveData();
     }
   }
@@ -576,6 +583,16 @@
     showToast('Expense deleted', 'success');
   }
 
+  function deleteExpenseNote(id) {
+    var exp = data.expenses.find(function (e) { return e.id === id; });
+    if (exp && exp.comment) {
+      delete exp.comment;
+      saveData();
+      refreshAll();
+      showToast('Note removed', 'success');
+    }
+  }
+
   function startEdit(id) {
     var exp = data.expenses.find(function (e) { return e.id === id; });
     if (!exp) return;
@@ -584,8 +601,18 @@
     dom.expenseCategory.value = exp.categoryId;
     dom.expenseSubcategory.value = exp.subcategory;
     dom.expenseDate.value = exp.date;
+
+    if (exp.comment) {
+      dom.expenseNote.value = exp.comment;
+      updateNoteCharCounter();
+      expandNoteBox();
+    } else {
+      collapseNoteBox();
+    }
+
     dom.addExpenseBtn.textContent = 'Update Expense';
     updateSubcategoryDatalist(exp.categoryId);
+
     if (!dom.cancelEditBtn) {
       var cancelBtn = document.createElement('button');
       cancelBtn.type = 'button';
@@ -603,6 +630,7 @@
     editingId = null;
     dom.expenseForm.reset();
     dom.expenseDate.value = todayStr();
+    collapseNoteBox();
     dom.addExpenseBtn.textContent = 'Add Expense';
     clearInputErrors();
     if (dom.cancelEditBtn) { dom.cancelEditBtn.remove(); dom.cancelEditBtn = null; }
@@ -616,14 +644,14 @@
   }
 
   async function handleExpenseSubmit(e) {
-    console.log("SUBMIT FUNCTION CALLED");
-    
     e.preventDefault();
 
     var amount = dom.expenseAmount.value;
     var categoryId = dom.expenseCategory.value;
     var subcategory = dom.expenseSubcategory.value;
     var date = dom.expenseDate.value;
+    var comment = dom.noteContainer.classList.contains('collapsed') ? '' : dom.expenseNote.value;
+
     clearInputErrors();
     var valid = true;
     if (!amount || parseFloat(amount) <= 0) { dom.expenseAmount.classList.add('input-error'); valid = false; }
@@ -632,14 +660,15 @@
     if (!valid) { showToast('Please fill in all required fields', 'error'); return; }
 
     if (editingId) {
-      updateExpense(editingId, amount, categoryId, subcategory, date);
+      updateExpense(editingId, amount, categoryId, subcategory, date, comment);
       showToast('Expense updated', 'success');
       cancelEdit();
     } else {
-      addExpense(amount, categoryId, subcategory, date);
+      addExpense(amount, categoryId, subcategory, date, comment);
       showToast('Expense added', 'success');
       dom.expenseForm.reset();
       dom.expenseDate.value = todayStr();
+      collapseNoteBox();
     }
     refreshAll();
   }
@@ -657,8 +686,7 @@
   }
 
   /* ================================================================
-     EXPENSE RENDERING
-     Uses getCat() for every row → always shows current name & color.
+     EXPENSE RENDERING (TABLE & CARDS)
      ================================================================ */
   function renderExpenses() {
     var filterVal = dom.filterCategory.value;
@@ -671,7 +699,6 @@
     var isEmpty = filtered.length === 0;
     dom.emptyState.classList.toggle('hidden', !isEmpty);
 
-    // Responsive: table on desktop, cards on mobile
     if (window.innerWidth >= 768) {
       dom.expenseTableWrapper.style.display = isEmpty ? 'none' : '';
       dom.expenseCards.style.display = 'none';
@@ -683,11 +710,52 @@
     renderCards(filtered);
   }
 
+  function createNoteElement(commentText, expId) {
+    var noteDiv = document.createElement('div');
+    noteDiv.className = 'table-note-line';
+
+    var noteIcon = document.createElement('span');
+    noteIcon.className = 'note-icon';
+    noteIcon.textContent = '📝';
+
+    var noteText = document.createElement('span');
+    noteText.className = 'note-text' + (commentText.length > 60 ? ' clamped' : '');
+    noteText.textContent = commentText;
+
+    noteDiv.appendChild(noteIcon);
+    noteDiv.appendChild(noteText);
+
+    if (commentText.length > 60) {
+      var toggleBtn = document.createElement('button');
+      toggleBtn.className = 'btn-inline-text';
+      toggleBtn.type = 'button';
+      toggleBtn.textContent = 'show more';
+      toggleBtn.addEventListener('click', function () {
+        var isClamped = noteText.classList.toggle('clamped');
+        toggleBtn.textContent = isClamped ? 'show more' : 'show less';
+      });
+      noteDiv.appendChild(toggleBtn);
+    }
+
+    var delNoteBtn = document.createElement('button');
+    delNoteBtn.className = 'btn-delete-note';
+    delNoteBtn.type = 'button';
+    delNoteBtn.textContent = 'Delete note';
+    delNoteBtn.title = 'Delete note only';
+    delNoteBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      deleteExpenseNote(expId);
+    });
+    noteDiv.appendChild(delNoteBtn);
+
+    return noteDiv;
+  }
+
   function renderTable(list) {
     var tbody = dom.expenseTableBody;
     tbody.innerHTML = '';
     list.forEach(function (exp) {
-      var cat = getCat(exp.categoryId); // ← always fresh name & color
+      var cat = getCat(exp.categoryId);
       var tr = document.createElement('tr');
 
       var tdDate = document.createElement('td');
@@ -696,12 +764,16 @@
       var tdCat = document.createElement('td');
       var badge = document.createElement('span');
       badge.className = 'table-category-badge';
-      badge.style.backgroundColor = cat ? cat.color : '#6b7280'; // ← updated color
-      badge.textContent = cat ? cat.name : 'Unknown';            // ← updated name
+      badge.style.backgroundColor = cat ? cat.color : '#6b7280';
+      badge.textContent = cat ? cat.name : 'Unknown';
       tdCat.appendChild(badge);
 
       var tdSub = document.createElement('td');
       tdSub.textContent = exp.subcategory || '\u2014';
+
+      if (exp.comment) {
+        tdSub.appendChild(createNoteElement(exp.comment, exp.id));
+      }
 
       var tdAmt = document.createElement('td');
       tdAmt.className = 'table-amount';
@@ -724,7 +796,7 @@
     var container = dom.expenseCards;
     container.innerHTML = '';
     list.forEach(function (exp) {
-      var cat = getCat(exp.categoryId); // ← always fresh
+      var cat = getCat(exp.categoryId);
       var card = document.createElement('div');
       card.className = 'expense-card';
 
@@ -743,8 +815,8 @@
       details.className = 'expense-card-details';
       var badge = document.createElement('span');
       badge.className = 'table-category-badge';
-      badge.style.backgroundColor = cat ? cat.color : '#6b7280'; // ← updated color
-      badge.textContent = cat ? cat.name : 'Unknown';            // ← updated name
+      badge.style.backgroundColor = cat ? cat.color : '#6b7280';
+      badge.textContent = cat ? cat.name : 'Unknown';
       details.appendChild(badge);
       if (exp.subcategory) {
         var subSpan = document.createElement('span');
@@ -753,14 +825,19 @@
         details.appendChild(subSpan);
       }
 
+      card.appendChild(header);
+      card.appendChild(details);
+
+      if (exp.comment) {
+        card.appendChild(createNoteElement(exp.comment, exp.id));
+      }
+
       var actions = document.createElement('div');
       actions.className = 'expense-card-actions';
       actions.appendChild(createEditBtn(exp.id));
       actions.appendChild(createDeleteBtn(exp.id));
-
-      card.appendChild(header);
-      card.appendChild(details);
       card.appendChild(actions);
+
       container.appendChild(card);
     });
   }
@@ -785,7 +862,7 @@
   }
 
   /* ================================================================
-     DASHBOARD
+     DASHBOARD & ANALYTICS
      ================================================================ */
   function calculateTotals() {
     var today = todayStr(), wStart = weekStartStr(), mStart = monthStartStr(), yStart = yearStartStr();
@@ -808,16 +885,13 @@
     dom.amountYearly.textContent = formatCurrency(t.yearly);
   }
 
-  /* ================================================================
-     ANALYTICS
-     ================================================================ */
   function findTopCategory() {
     if (data.expenses.length === 0) return null;
     var map = {};
     data.expenses.forEach(function (e) { map[e.categoryId] = (map[e.categoryId] || 0) + e.amount; });
     var topId = null, topAmt = 0;
     Object.keys(map).forEach(function (id) { if (map[id] > topAmt) { topAmt = map[id]; topId = id; } });
-    return topId ? { category: getCat(topId), amount: topAmt } : null; // ← fresh name
+    return topId ? { category: getCat(topId), amount: topAmt } : null;
   }
 
   function findHighestSpendingDay() {
@@ -911,7 +985,7 @@
   }
 
   /* ================================================================
-     CHARTS — use getCat() so renamed categories show updated names/colors
+     CHARTS
      ================================================================ */
   function getChartTextColor() { return getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#8b90a5'; }
   function getChartBgColor() { return getComputedStyle(document.documentElement).getPropertyValue('--bg-secondary').trim() || '#ffffff'; }
@@ -922,7 +996,7 @@
     data.expenses.forEach(function (e) { catTotals[e.categoryId] = (catTotals[e.categoryId] || 0) + e.amount; });
     var labels = [], values = [], colors = [];
     Object.keys(catTotals).forEach(function (id) {
-      var cat = getCat(id); // ← fresh name & color after edit
+      var cat = getCat(id);
       labels.push(cat ? cat.name : 'Unknown');
       values.push(catTotals[id]);
       colors.push(cat ? cat.color : '#6b7280');
@@ -966,7 +1040,7 @@
   }
 
   /* ================================================================
-     HEATMAP
+     HEATMAP & TOOLTIP
      ================================================================ */
   function renderHeatmap() {
     var grid = dom.heatmapGrid;
@@ -978,15 +1052,38 @@
       dailyTotals[ds] = total;
       if (total > maxAmount) maxAmount = total;
     }
+
+    var tooltip = $('heatmapTooltip');
+    if (!tooltip) {
+      tooltip = document.createElement('div');
+      tooltip.id = 'heatmapTooltip';
+      tooltip.className = 'heatmap-tooltip';
+      document.body.appendChild(tooltip);
+    }
+
     for (var j = totalDays - 1; j >= 0; j--) {
       var dateStr = daysAgoStr(j), amt = dailyTotals[dateStr];
       var cell = document.createElement('div');
       cell.className = 'heatmap-cell';
-      cell.title = formatDateShort(dateStr) + ': ' + formatCurrency(amt);
+      cell.dataset.tooltip = formatDateShort(dateStr) + ': ' + formatCurrency(amt);
+
       if (maxAmount > 0 && amt > 0) {
         var r = amt / maxAmount;
         cell.classList.add(r >= 0.75 ? 'level-4' : r >= 0.5 ? 'level-3' : r >= 0.25 ? 'level-2' : 'level-1');
       }
+
+      cell.addEventListener('mouseenter', function (e) {
+        tooltip.textContent = this.dataset.tooltip;
+        tooltip.classList.add('visible');
+        var rect = this.getBoundingClientRect();
+        tooltip.style.left = (rect.left + rect.width / 2 - tooltip.offsetWidth / 2) + 'px';
+        tooltip.style.top = (rect.top - tooltip.offsetHeight - 6) + 'px';
+      });
+
+      cell.addEventListener('mouseleave', function () {
+        tooltip.classList.remove('visible');
+      });
+
       grid.appendChild(cell);
     }
   }
@@ -1009,15 +1106,12 @@
   }
 
   /* ================================================================
-     EXPORT PDF — Monthly report with polished, systematic layout
+     EXPORT PDF
      ================================================================ */
-    function generatePDF() {
-
-    
-
+  function generatePDF() {
     try {
       if (typeof window.jspdf === 'undefined' || !window.jspdf.jsPDF) {
-        showToast('PDF library not loaded — check your internet connection and refresh the page.', 'error');
+        showToast('PDF library not loaded — refresh the page.', 'error');
         return;
       }
 
@@ -1028,14 +1122,12 @@
       var cw = pw - mg * 2;
       var pdfCur = function(n) { return 'Rs. ' + Number(n).toFixed(2); };
 
-      // ── Parse hex color to RGB array ──
       function hexRgb(hex) {
         hex = (hex || '#6b7280').replace('#', '');
         if (hex.length === 3) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
         return [parseInt(hex.substring(0,2),16), parseInt(hex.substring(2,4),16), parseInt(hex.substring(4,6),16)];
       }
 
-      // ── Filter current month expenses ──
       var now = new Date();
       var mStart = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0') + '-01';
       var monthLabel = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
@@ -1044,11 +1136,9 @@
       monthlyExp.sort(function(a,b){ return b.date.localeCompare(a.date); });
       var totalMonth = monthlyExp.reduce(function(s,e){ return s + e.amount; }, 0);
 
-      // Days elapsed this month for avg calculation
       var daysElapsed = now.getDate();
       var avgDaily = daysElapsed > 0 ? totalMonth / daysElapsed : 0;
 
-      // ── Helper: draw footer on every page ──
       function drawFooter() {
         var pn = doc.internal.getNumberOfPages();
         for (var p = 1; p <= pn; p++) {
@@ -1063,19 +1153,11 @@
         }
       }
 
-      // ══════════════════════════════════════════════
-      // TOP ACCENT BAR
-      // ══════════════════════════════════════════════
       doc.setFillColor(99, 102, 241);
       doc.rect(0, 0, pw, 5, 'F');
-
-      // Thin gold accent line below
       doc.setFillColor(245, 158, 11);
       doc.rect(0, 5, pw, 1, 'F');
 
-      // ══════════════════════════════════════════════
-      // HEADER SECTION
-      // ══════════════════════════════════════════════
       var y = 18;
       doc.setFontSize(24);
       doc.setFont('helvetica', 'bold');
@@ -1097,17 +1179,11 @@
       doc.text('Generated: ' + new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
         + '  |  Total entries: ' + monthlyExp.length, mg, y);
 
-      // ══════════════════════════════════════════════
-      // DIVIDER
-      // ══════════════════════════════════════════════
       y += 5;
       doc.setDrawColor(230);
       doc.setLineWidth(0.4);
       doc.line(mg, y, pw - mg, y);
 
-      // ══════════════════════════════════════════════
-      // SUMMARY CARDS (4 across)
-      // ══════════════════════════════════════════════
       y += 6;
       var cardH = 26;
       var cardGap = 5;
@@ -1123,30 +1199,22 @@
 
       cards.forEach(function(card, i) {
         var cx = mg + i * (cardW + cardGap);
-        // Card shadow effect
         doc.setFillColor(235, 237, 243);
         doc.roundedRect(cx + 0.5, y + 0.5, cardW, cardH, 3, 3, 'F');
-        // Card background
         doc.setFillColor(250, 251, 254);
         doc.roundedRect(cx, y, cardW, cardH, 3, 3, 'F');
-        // Top accent line
         doc.setFillColor(card.accent[0], card.accent[1], card.accent[2]);
         doc.rect(cx, y, cardW, 2.5, 'F');
-        // Label
         doc.setFontSize(6.5);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(card.accent[0], card.accent[1], card.accent[2]);
         doc.text(card.label, cx + 6, y + 11);
-        // Value
         doc.setFontSize(11);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(30, 30, 60);
         doc.text(card.value, cx + 6, y + 21);
       });
 
-      // ══════════════════════════════════════════════
-      // CATEGORY BREAKDOWN with progress bars
-      // ══════════════════════════════════════════════
       var catTotals = {};
       monthlyExp.forEach(function(e){ catTotals[e.categoryId] = (catTotals[e.categoryId] || 0) + e.amount; });
 
@@ -1174,7 +1242,6 @@
         if (y > 258) {
           doc.addPage();
           y = 18;
-          // Repeat section header on new page
           doc.setFontSize(13);
           doc.setFont('helvetica', 'bold');
           doc.setTextColor(30, 30, 60);
@@ -1188,30 +1255,23 @@
         var pct = totalMonth > 0 ? (entry.amount / totalMonth) * 100 : 0;
         var barW = totalMonth > 0 ? (entry.amount / totalMonth) * barMaxW : 0;
 
-        // Category name
         doc.setFontSize(9);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(50, 50, 70);
         doc.text(entry.name, mg, y);
 
-        // Percentage badge
         doc.setFont('helvetica', 'normal');
         doc.setTextColor(140);
-        var pctText = pct.toFixed(1) + '%';
-        doc.text(pctText, mg + 52, y);
+        doc.text(pct.toFixed(1) + '%', mg + 52, y);
 
-        // Amount right-aligned
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(50, 50, 70);
         doc.text(pdfCur(entry.amount), pw - mg, y, { align: 'right' });
 
         y += 3;
-
-        // Bar track
         doc.setFillColor(235, 237, 245);
         doc.roundedRect(mg, y, barMaxW, barH, 2, 2, 'F');
 
-        // Bar fill
         if (barW > 1) {
           var rgb = hexRgb(entry.color);
           doc.setFillColor(rgb[0], rgb[1], rgb[2]);
@@ -1221,14 +1281,12 @@
         y += barH + 9;
       });
 
-      // Total row with double line above
       if (catEntries.length > 0) {
         doc.setDrawColor(180);
         doc.setLineWidth(0.5);
         doc.line(mg, y - 5, pw - mg, y - 5);
         doc.setLineWidth(0.2);
         doc.line(mg, y - 3.5, pw - mg, y - 3.5);
-
         doc.setFontSize(11);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(30, 30, 60);
@@ -1237,9 +1295,6 @@
         y += 14;
       }
 
-      // ══════════════════════════════════════════════
-      // DETAILED EXPENSE TABLE
-      // ══════════════════════════════════════════════
       if (monthlyExp.length > 0) {
         if (y > 215) { doc.addPage(); y = 18; }
 
@@ -1254,14 +1309,12 @@
         doc.line(mg, y, pw - mg, y);
         y += 6;
 
-        // Column positions
         var colDate = mg;
         var colCat = mg + 30;
         var colSub = mg + 82;
         var colAmtR = pw - mg;
         var rowH = 7.5;
 
-        // ── Helper: draw table header ──
         function drawTableHeader(ty) {
           doc.setFillColor(30, 30, 60);
           doc.roundedRect(mg, ty, cw, rowH, 2, 2, 'F');
@@ -1277,48 +1330,50 @@
 
         y = drawTableHeader(y);
 
-        // ── Helper: draw a data row ──
         function drawRow(exp, idx, ry) {
           var cat = getCat(exp.categoryId);
           var rgb = cat && cat.color ? hexRgb(cat.color) : [107, 114, 128];
+          var hasNote = !!exp.comment;
+          var curRowH = hasNote ? rowH + 4.5 : rowH;
 
-          // Alternating background
           if (idx % 2 === 0) {
             doc.setFillColor(248, 249, 253);
-            doc.rect(mg, ry, cw, rowH, 'F');
+            doc.rect(mg, ry, cw, curRowH, 'F');
           }
 
-          // Color dot
           doc.setFillColor(rgb[0], rgb[1], rgb[2]);
-          doc.circle(colCat + 2, ry + rowH / 2, 1.8, 'F');
+          doc.circle(colCat + 2, ry + 4, 1.8, 'F');
 
-          // Date
           doc.setFontSize(8);
           doc.setFont('helvetica', 'normal');
           doc.setTextColor(100);
           doc.text(formatDateShort(exp.date), colDate + 3, ry + 5);
 
-          // Category
           doc.setTextColor(50);
           doc.setFont('helvetica', 'bold');
           doc.text(cat ? cat.name : 'Unknown', colCat + 6, ry + 5);
 
-          // Subcategory
           doc.setFont('helvetica', 'normal');
           doc.setTextColor(150);
           doc.text(exp.subcategory || '\u2014', colSub + 3, ry + 5);
 
-          // Amount
           doc.setFont('helvetica', 'bold');
           doc.setTextColor(50);
           doc.text(pdfCur(exp.amount), colAmtR - 3, ry + 5, { align: 'right' });
 
-          return ry + rowH;
+          if (hasNote) {
+            doc.setFontSize(7);
+            doc.setFont('helvetica', 'italic');
+            doc.setTextColor(130);
+            doc.text('Note: ' + exp.comment, colCat + 6, ry + 9.5);
+          }
+
+          return ry + curRowH;
         }
 
-        // Draw rows, paginating as needed
         monthlyExp.forEach(function(exp, idx) {
-          if (y + rowH > ph - 18) {
+          var neededH = exp.comment ? rowH + 4.5 : rowH;
+          if (y + neededH > ph - 18) {
             doc.addPage();
             y = 18;
             y = drawTableHeader(y);
@@ -1326,44 +1381,32 @@
           y = drawRow(exp, idx, y);
         });
 
-        // Table bottom border
         doc.setDrawColor(200);
         doc.setLineWidth(0.3);
         doc.line(mg, y, pw - mg, y);
         y += 3;
 
-        // Row count label
         doc.setFontSize(7);
         doc.setFont('helvetica', 'italic');
         doc.setTextColor(160);
         doc.text(monthlyExp.length + ' transaction' + (monthlyExp.length !== 1 ? 's' : '') + ' in ' + monthLabel, mg, y);
-
       } else {
-        // ── No expenses message ──
         y += 10;
-        // Dashed box
         doc.setDrawColor(200);
         doc.setLineWidth(0.3);
         doc.setLineDashPattern([3, 3], 0);
         doc.roundedRect(mg + 20, y - 5, cw - 40, 30, 4, 4, 'S');
         doc.setLineDashPattern([], 0);
-
         doc.setFontSize(11);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(160);
         doc.text('No expenses recorded for ' + monthLabel, pw / 2, y + 6, { align: 'center' });
-
         doc.setFontSize(8.5);
         doc.setFont('helvetica', 'normal');
         doc.text('Start adding expenses to see them here in your monthly report.', pw / 2, y + 15, { align: 'center' });
       }
 
-      // ══════════════════════════════════════════════
-      // FOOTER ON ALL PAGES
-      // ══════════════════════════════════════════════
       drawFooter();
-
-      // ── Save ──
       doc.save('expense-report-' + monthFile + '.pdf');
       showToast('PDF exported for ' + monthLabel, 'success');
     } catch (err) {
@@ -1373,17 +1416,355 @@
   }
 
   /* ================================================================
-     REFRESH ALL — one call updates every single UI element
+     EXPORT JSON & IMPORT (JSON / CSV)
+     ================================================================ */
+  function exportJSON() {
+    var backup = {
+      version: '1.0',
+      exportedAt: new Date().toISOString(),
+      expenses: data.expenses,
+      categories: data.categories,
+      settings: data.settings
+    };
+    var str = JSON.stringify(backup, null, 2);
+    var blob = new Blob([str], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'expense-tracker-backup-' + todayStr() + '.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast('Backup exported as JSON', 'success');
+  }
+
+  function handleImportClick() {
+    dom.importFileInput.click();
+  }
+
+  function handleImportFileSelect(e) {
+    var file = e.target.files && e.target.files[0];
+    if (!file) return;
+
+    var reader = new FileReader();
+    reader.onload = function (evt) {
+      var content = evt.target.result;
+      var parsed = parseImportContent(file.name, content);
+
+      if (!parsed || (parsed.expenses.length === 0 && parsed.skippedCount === 0)) {
+        showToast('Invalid or empty file format', 'error');
+        dom.importFileInput.value = '';
+        return;
+      }
+
+      if (parsed.expenses.length === 0) {
+        showToast('No valid expenses found. ' + parsed.skippedCount + ' row(s) skipped.', 'error');
+        dom.importFileInput.value = '';
+        return;
+      }
+
+      pendingImportData = parsed;
+      var count = parsed.expenses.length;
+      var skipText = parsed.skippedCount > 0 ? ' (' + parsed.skippedCount + ' bad row' + (parsed.skippedCount > 1 ? 's' : '') + ' skipped)' : '';
+      dom.importSummaryText.textContent = 'Found ' + count + ' valid expense' + (count === 1 ? '' : 's') + ' in file' + skipText + '. How would you like to proceed?';
+      openImportModal();
+      dom.importFileInput.value = '';
+    };
+    reader.onerror = function () {
+      showToast('Error reading file', 'error');
+      dom.importFileInput.value = '';
+    };
+    reader.readAsText(file);
+  }
+
+  function parseImportContent(filename, text) {
+    var ext = filename.split('.').pop().toLowerCase();
+    var skippedCount = 0;
+    var parsedExpenses = [];
+    var parsedCategories = [];
+
+    text = text.trim();
+    if (!text) return null;
+
+    if (ext === 'json' || text.startsWith('{') || text.startsWith('[')) {
+      try {
+        var json = JSON.parse(text);
+        var rawExpenses = [];
+        if (Array.isArray(json)) {
+          rawExpenses = json;
+        } else if (typeof json === 'object' && json !== null) {
+          if (Array.isArray(json.expenses)) rawExpenses = json.expenses;
+          if (Array.isArray(json.categories)) parsedCategories = json.categories;
+        } else {
+          return null;
+        }
+
+        rawExpenses.forEach(function (item) {
+          var date = item.date || item.Date;
+          var amount = parseFloat(item.amount !== undefined ? item.amount : item.Amount);
+          var catName = item.category || item.Category || item.categoryName || '';
+          var catId = item.categoryId || '';
+          var subcat = item.subcategory || item.Subcategory || '';
+          var comment = item.comment || item.Comment || item.note || item.Note || '';
+
+          if (!date || isNaN(Date.parse(date)) || isNaN(amount) || amount <= 0) {
+            skippedCount++;
+            return;
+          }
+
+          var formattedDate = new Date(date).toISOString().split('T')[0];
+
+          parsedExpenses.push({
+            id: item.id || uid(),
+            amount: amount,
+            categoryId: catId,
+            categoryName: typeof catName === 'string' ? catName.trim() : '',
+            subcategory: typeof subcat === 'string' ? subcat.trim() : '',
+            date: formattedDate,
+            comment: typeof comment === 'string' ? comment.trim() : '',
+            createdAt: item.createdAt || new Date().toISOString()
+          });
+        });
+      } catch (err) {
+        return null;
+      }
+    } else {
+      var lines = text.split(/\r?\n/).filter(function (l) { return l.trim().length > 0; });
+      if (lines.length < 2) return null;
+
+      var headers = parseCSVLine(lines[0]).map(function (h) { return h.trim().toLowerCase(); });
+      var idxDate = headers.findIndex(function (h) { return h === 'date'; });
+      var idxCat = headers.findIndex(function (h) { return h === 'category'; });
+      var idxSub = headers.findIndex(function (h) { return h === 'subcategory'; });
+      var idxAmt = headers.findIndex(function (h) { return h === 'amount'; });
+      var idxComment = headers.findIndex(function (h) { return h === 'comment' || h === 'note'; });
+
+      if (idxDate === -1 || idxAmt === -1) return null;
+
+      for (var i = 1; i < lines.length; i++) {
+        var row = parseCSVLine(lines[i]);
+        if (row.length === 0) continue;
+
+        var rawDate = row[idxDate];
+        var rawAmt = row[idxAmt];
+        var rawCat = idxCat !== -1 ? row[idxCat] : 'General';
+        var rawSub = idxSub !== -1 ? row[idxSub] : '';
+        var rawComment = idxComment !== -1 ? row[idxComment] : '';
+
+        var amount = parseFloat(rawAmt);
+        if (!rawDate || isNaN(Date.parse(rawDate)) || isNaN(amount) || amount <= 0) {
+          skippedCount++;
+          continue;
+        }
+
+        var formattedDate = new Date(rawDate).toISOString().split('T')[0];
+
+        parsedExpenses.push({
+          id: uid(),
+          amount: amount,
+          categoryName: (rawCat || 'General').trim(),
+          subcategory: (rawSub || '').trim(),
+          date: formattedDate,
+          comment: (rawComment || '').trim(),
+          createdAt: new Date().toISOString()
+        });
+      }
+    }
+
+    return {
+      expenses: parsedExpenses,
+      categories: parsedCategories,
+      skippedCount: skippedCount
+    };
+  }
+
+  function parseCSVLine(line) {
+    var result = [];
+    var current = '';
+    var inQuotes = false;
+    for (var i = 0; i < line.length; i++) {
+      var c = line[i];
+      if (c === '"') {
+        inQuotes = !inQuotes;
+      } else if (c === ',' && !inQuotes) {
+        result.push(current);
+        current = '';
+      } else {
+        current += c;
+      }
+    }
+    result.push(current);
+    return result.map(function(s) { return s.replace(/^"|"$/g, '').trim(); });
+  }
+
+  function openImportModal() {
+    dom.importModal.classList.remove('hidden');
+  }
+
+  function closeImportModal() {
+    dom.importModal.classList.add('hidden');
+    pendingImportData = null;
+  }
+
+  function executeImport(mode) {
+    if (!pendingImportData) return;
+
+    var importedExp = pendingImportData.expenses;
+    var importedCats = pendingImportData.categories || [];
+    var skippedCount = pendingImportData.skippedCount || 0;
+
+    if (mode === 'replace') {
+      data.expenses = [];
+      if (importedCats.length > 0) {
+        data.categories = [];
+        importedCats.forEach(function (cat) {
+          if (cat.name) {
+            data.categories.push({
+              id: cat.id || uid(),
+              name: cat.name.trim(),
+              color: cat.color ? colorToHex(cat.color) : colorToHex(nameToColor(cat.name)),
+              subcategories: Array.isArray(cat.subcategories) ? cat.subcategories : []
+            });
+          }
+        });
+      }
+    }
+
+    function resolveCatId(catId, catName) {
+      if (catId) {
+        var existingById = getCat(catId);
+        if (existingById) return existingById.id;
+      }
+      var nameToMatch = catName || 'Uncategorized';
+      var existingByName = data.categories.find(function (c) {
+        return c.name.toLowerCase() === nameToMatch.toLowerCase();
+      });
+      if (existingByName) return existingByName.id;
+
+      var newCat = {
+        id: uid(),
+        name: nameToMatch,
+        color: colorToHex(nameToColor(nameToMatch)),
+        subcategories: []
+      };
+      data.categories.push(newCat);
+      return newCat.id;
+    }
+
+    var addedCount = 0;
+
+    importedExp.forEach(function (exp) {
+      var finalCatId = resolveCatId(exp.categoryId, exp.categoryName);
+
+      if (mode === 'merge') {
+        var isDuplicate = data.expenses.some(function (existing) {
+          if (existing.id && exp.id && existing.id === exp.id) return true;
+          return existing.date === exp.date &&
+                 Math.abs(existing.amount - exp.amount) < 0.001 &&
+                 existing.categoryId === finalCatId &&
+                 (existing.subcategory || '').toLowerCase() === (exp.subcategory || '').toLowerCase() &&
+                 (existing.comment || '').toLowerCase() === (exp.comment || '').toLowerCase();
+        });
+        if (isDuplicate) return;
+      }
+
+      saveSubcategoryFromExpense(finalCatId, exp.subcategory);
+
+      var newExp = {
+        id: uid(),
+        amount: exp.amount,
+        categoryId: finalCatId,
+        subcategory: exp.subcategory || '',
+        date: exp.date,
+        createdAt: exp.createdAt || new Date().toISOString()
+      };
+      if (exp.comment) newExp.comment = exp.comment;
+
+      data.expenses.push(newExp);
+      addedCount++;
+    });
+
+    saveData();
+    refreshAll();
+    closeImportModal();
+    showToast(addedCount + ' imported' + (skippedCount > 0 ? ', ' + skippedCount + ' skipped' : ''), 'success');
+  }
+
+  /* ================================================================
+     NAVIGATION & SCROLL-SPY
+     ================================================================ */
+  function initNavigation() {
+    var header = dom.appHeader;
+    var nav = dom.headerNav;
+    if (!nav) return;
+    var links = nav.querySelectorAll('.nav-link');
+    var hamburger = dom.hamburgerToggle;
+
+    if (hamburger) {
+      hamburger.addEventListener('click', function () {
+        var isOpen = header.classList.toggle('nav-open');
+        hamburger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+      });
+    }
+
+    links.forEach(function (link) {
+      link.addEventListener('click', function (e) {
+        var targetId = link.getAttribute('data-target') || link.getAttribute('href').replace('#', '');
+        var section = document.getElementById(targetId);
+        if (section) {
+          e.preventDefault();
+          header.classList.remove('nav-open');
+          if (hamburger) hamburger.setAttribute('aria-expanded', 'false');
+
+          section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+          links.forEach(function (l) { l.classList.remove('active'); });
+          link.classList.add('active');
+        }
+      });
+    });
+
+    var sections = Array.from(links).map(function (l) {
+      var id = l.getAttribute('data-target') || l.getAttribute('href').replace('#', '');
+      return document.getElementById(id);
+    }).filter(Boolean);
+
+    function onScroll() {
+      var scrollPos = window.scrollY + 100;
+      var currentSection = null;
+
+      for (var i = 0; i < sections.length; i++) {
+        var sec = sections[i];
+        if (sec.offsetTop <= scrollPos) {
+          currentSection = sec;
+        }
+      }
+
+      if (currentSection) {
+        var activeId = currentSection.id;
+        links.forEach(function (l) {
+          var targetId = l.getAttribute('data-target') || l.getAttribute('href').replace('#', '');
+          l.classList.toggle('active', targetId === activeId);
+        });
+      }
+    }
+
+    window.addEventListener('scroll', onScroll, { passive: true });
+  }
+
+  /* ================================================================
+     REFRESH ALL
      ================================================================ */
   function refreshAll() {
-    renderCategories();       // Category badges (name + color)
-    updateCategoryDropdowns(); // Expense form select + filter select
-    renderExpenses();          // Table rows + mobile cards (badges use getCat)
-    updateDashboard();         // Summary cards
-    renderPieChart();          // Doughnut labels + colors
-    renderLineChart();         // Line chart
-    renderHeatmap();           // Heatmap grid
-    generateInsights();        // Insight messages reference category names
+    renderCategories();
+    updateCategoryDropdowns();
+    renderExpenses();
+    updateDashboard();
+    renderPieChart();
+    renderLineChart();
+    renderHeatmap();
+    generateInsights();
   }
 
   /* ================================================================
@@ -1398,39 +1779,36 @@
   function bindEvents() {
     dom.darkModeToggle.addEventListener('click', toggleTheme);
     dom.expenseForm.addEventListener('submit', handleExpenseSubmit);
-    [dom.expenseAmount, dom.expenseCategory, dom.expenseDate].forEach(function (el) {
+
+    [dom.expenseAmount, dom.expenseCategory, dom.expenseDate, dom.expenseNote].forEach(function (el) {
+      if (!el) return;
       el.addEventListener('input', function () { el.classList.remove('input-error'); });
       el.addEventListener('change', function () { el.classList.remove('input-error'); });
     });
+
     dom.expenseCategory.addEventListener('change', handleCategoryChange);
 
-    // Auto-color while typing new category name
+    dom.toggleNoteBtn.addEventListener('click', toggleNoteBox);
+    dom.removeNoteBtn.addEventListener('click', collapseNoteBox);
+    dom.expenseNote.addEventListener('input', updateNoteCharCounter);
+
     dom.categoryNameInput.addEventListener('input', handleCategoryNameInput);
 
-    // Add or Update category
     dom.addCategoryBtn.addEventListener('click', function () {
       var name = dom.categoryNameInput.value;
       var color = dom.categoryColorPicker.value;
       if (addCategory(name, color)) {
-        // Reset form only if it was a fresh add (edit mode resets in cancelCategoryEdit)
         if (!editingCatId) {
           dom.categoryNameInput.value = '';
           dom.categoryColorPicker.value = colorToHex(nameToColor(''));
         }
       }
-     dom.filterCategory.addEventListener('change', renderExpenses);
-    dom.exportPdfBtn.addEventListener('click', generatePDF);
-    window.addEventListener('resize', debouncedResize);
-
-    // ═══ NEW: Navigation click + scroll spy ═══
-    initNavigation();
     });
 
     dom.categoryNameInput.addEventListener('keydown', function (e) {
       if (e.key === 'Enter') { e.preventDefault(); dom.addCategoryBtn.click(); }
     });
 
-    // Subcategory manager
     dom.subCatCategorySelect.addEventListener('change', renderSubcategoryList);
     dom.addSubCatBtn.addEventListener('click', function () {
       var catId = dom.subCatCategorySelect.value;
@@ -1442,7 +1820,26 @@
 
     dom.filterCategory.addEventListener('change', renderExpenses);
     dom.exportPdfBtn.addEventListener('click', generatePDF);
+    dom.exportJsonBtn.addEventListener('click', exportJSON);
+    dom.importBtn.addEventListener('click', handleImportClick);
+    dom.importFileInput.addEventListener('change', handleImportFileSelect);
+
+    dom.closeImportModalBtn.addEventListener('click', closeImportModal);
+    dom.importMergeBtn.addEventListener('click', function () { executeImport('merge'); });
+    dom.importReplaceBtn.addEventListener('click', function () { executeImport('replace'); });
+    dom.importModal.addEventListener('click', function (e) {
+      if (e.target === dom.importModal) closeImportModal();
+    });
+
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && !dom.importModal.classList.contains('hidden')) {
+        closeImportModal();
+      }
+    });
+
     window.addEventListener('resize', debouncedResize);
+
+    initNavigation();
   }
 
   /* ================================================================
@@ -1451,9 +1848,12 @@
   async function init() {
     dom = {
       darkModeToggle: $('darkModeToggle'), toggleIcon: $('toggleIcon'),
+      hamburgerToggle: $('hamburgerToggle'), appHeader: $('appHeader'), headerNav: $('headerNav'),
       expenseForm: $('expenseForm'), expenseFormSection: $('expenseFormSection'),
       expenseAmount: $('expenseAmount'), expenseCategory: $('expenseCategory'),
       expenseSubcategory: $('expenseSubcategory'), expenseDate: $('expenseDate'),
+      toggleNoteBtn: $('toggleNoteBtn'), removeNoteBtn: $('removeNoteBtn'),
+      noteContainer: $('noteContainer'), expenseNote: $('expenseNote'), noteCharCounter: $('noteCharCounter'),
       addExpenseBtn: $('addExpenseBtn'),
       categoryNameInput: $('categoryNameInput'), categoryColorPicker: $('categoryColorPicker'),
       addCategoryBtn: $('addCategoryBtn'), categoryList: $('categoryList'),
@@ -1465,22 +1865,23 @@
       expenseTableBody: $('expenseTableBody'), expenseTableWrapper: $('expenseTableWrapper'),
       expenseCards: $('expenseCards'), emptyState: $('emptyState'),
       filterCategory: $('filterCategory'), exportPdfBtn: $('exportPdfBtn'),
+      exportJsonBtn: $('exportJsonBtn'), importBtn: $('importBtn'), importFileInput: $('importFileInput'),
+      importModal: $('importModal'), closeImportModalBtn: $('closeImportModalBtn'),
+      importSummaryText: $('importSummaryText'), importMergeBtn: $('importMergeBtn'),
+      importReplaceBtn: $('importReplaceBtn'),
       cancelEditBtn: null, cancelCatEditBtn: null,
       subcategoryDatalist: null, subCatCategorySelect: null,
       subCatNameInput: null, addSubCatBtn: null, subCatListContainer: null
     };
 
-    // Datalist for subcategory autocomplete
     var datalist = document.createElement('datalist');
     datalist.id = 'subcategorySuggestions';
     document.body.appendChild(datalist);
     dom.subcategoryDatalist = datalist;
     dom.expenseSubcategory.setAttribute('list', 'subcategorySuggestions');
 
-    // Build subcategory manager panel
     buildSubcategoryManager();
 
-    // Default color picker state
     dom.categoryColorPicker.value = colorToHex(nameToColor(''));
 
     await loadData();
@@ -1489,14 +1890,13 @@
 
     refreshAll();
     bindEvents();
-  }
 
-  window.addEventListener('DOMContentLoaded', init);
-
-      // Disable PDF button if jspdf failed to load from CDN
     if (typeof window.jspdf === 'undefined' || !window.jspdf.jsPDF) {
       dom.exportPdfBtn.disabled = true;
       dom.exportPdfBtn.title = 'PDF library could not be loaded. Check your internet connection and refresh.';
     }
-    
+  }
+
+  window.addEventListener('DOMContentLoaded', init);
+
 })();

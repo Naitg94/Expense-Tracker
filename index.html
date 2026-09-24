@@ -20,8 +20,13 @@
 <body>
 
           <header class="app-header" id="appHeader">
+    <button class="hamburger-toggle" id="hamburgerToggle" type="button" aria-label="Toggle navigation menu" aria-expanded="false">
+      <span class="hamburger-bar"></span>
+      <span class="hamburger-bar"></span>
+      <span class="hamburger-bar"></span>
+    </button>
     <h1 class="app-title" id="appTitle">Expense Tracker</h1>
-    <nav class="header-nav" aria-label="Section navigation">
+    <nav class="header-nav" id="headerNav" aria-label="Section navigation">
       <a href="#expenseFormSection" class="nav-link active" data-target="expenseFormSection">Add Expense</a>
       <a href="#categorySection" class="nav-link" data-target="categorySection">Categories</a>
       <a href="#dashboardSection" class="nav-link" data-target="dashboardSection">Dashboard</a>
@@ -56,9 +61,25 @@
           <label for="expenseSubcategory">Subcategory</label>
           <input type="text" id="expenseSubcategory" class="form-input" placeholder="e.g. Groceries, Rent">
         </div>
-        <div class="form-group">
+        <div class="form-group form-group-note-btn">
+          <label class="note-btn-label-placeholder" aria-hidden="true">&nbsp;</label>
+          <button type="button" class="btn btn-secondary note-toggle-btn" id="toggleNoteBtn" aria-expanded="false" aria-controls="noteContainer">
+            <span class="note-btn-icon">📝</span> <span class="note-btn-text">Add Note</span>
+          </button>
+        </div>
+        <div class="form-group form-group-full">
           <label for="expenseDate">Date</label>
           <input type="date" id="expenseDate" class="form-input" required>
+        </div>
+        <div class="form-group form-group-full note-container collapsed" id="noteContainer">
+          <div class="note-header">
+            <label for="expenseNote">Note / Comment</label>
+            <button type="button" class="btn-remove-note" id="removeNoteBtn" title="Remove note" aria-label="Remove note">&times;</button>
+          </div>
+          <div class="textarea-wrapper">
+            <textarea id="expenseNote" class="form-input note-textarea" placeholder="Add an optional note (max 500 characters)..." maxlength="500" rows="4"></textarea>
+            <span class="char-counter" id="noteCharCounter">0/500</span>
+          </div>
         </div>
         <button type="submit" class="btn btn-primary" id="addExpenseBtn">Add Expense</button>
       </form>
@@ -89,19 +110,19 @@
       <div class="dashboard-cards" id="dashboardCards">
         <div class="dash-card" id="cardDaily">
           <span class="dash-card-label">Today</span>
-          <span class="dash-card-amount" id="amountDaily">$0.00</span>
+          <span class="dash-card-amount" id="amountDaily">&#8377;0.00</span>
         </div>
         <div class="dash-card" id="cardWeekly">
           <span class="dash-card-label">This Week</span>
-          <span class="dash-card-amount" id="amountWeekly">$0.00</span>
+          <span class="dash-card-amount" id="amountWeekly">&#8377;0.00</span>
         </div>
         <div class="dash-card" id="cardMonthly">
           <span class="dash-card-label">This Month</span>
-          <span class="dash-card-amount" id="amountMonthly">$0.00</span>
+          <span class="dash-card-amount" id="amountMonthly">&#8377;0.00</span>
         </div>
         <div class="dash-card" id="cardYearly">
           <span class="dash-card-label">This Year</span>
-          <span class="dash-card-amount" id="amountYearly">$0.00</span>
+          <span class="dash-card-amount" id="amountYearly">&#8377;0.00</span>
         </div>
       </div>
     </section>
@@ -132,8 +153,10 @@
     <!-- Heatmap Section -->
     <section class="section heatmap-section" id="heatmapSection" aria-labelledby="heatmapTitle">
       <h2 class="section-title" id="heatmapTitle">Spending Heatmap</h2>
-      <div class="heatmap-grid" id="heatmapGrid">
-        <!-- Dynamically populated heatmap cells -->
+      <div class="heatmap-wrapper">
+        <div class="heatmap-grid" id="heatmapGrid">
+          <!-- Dynamically populated heatmap cells -->
+        </div>
       </div>
       <div class="heatmap-legend" id="heatmapLegend">
         <span class="legend-label">Less</span>
@@ -159,7 +182,12 @@
               <option value="all">All Categories</option>
             </select>
           </div>
-          <button type="button" class="btn btn-export" id="exportPdfBtn">Export PDF</button>
+          <div class="expense-actions-group">
+            <button type="button" class="btn btn-export" id="exportPdfBtn">Export PDF</button>
+            <button type="button" class="btn btn-secondary" id="exportJsonBtn">Export JSON</button>
+            <button type="button" class="btn btn-secondary" id="importBtn">Import</button>
+            <input type="file" id="importFileInput" accept=".json,.csv" class="sr-only" aria-label="Import file">
+          </div>
         </div>
         <div class="expense-table-wrapper" id="expenseTableWrapper">
           <table class="expense-table" id="expenseTable">
@@ -187,6 +215,24 @@
     </section>
 
   </main>
+
+  <!-- Import Modal -->
+  <div class="modal-overlay hidden" id="importModal" role="dialog" aria-modal="true" aria-labelledby="importModalTitle">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 class="modal-title" id="importModalTitle">Import Data</h3>
+        <button type="button" class="modal-close-btn" id="closeImportModalBtn" aria-label="Close modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p id="importSummaryText">Found expenses in the file. How would you like to import them?</p>
+        <p class="modal-subtext">Merge mode retains existing data and adds new items. Replace mode overwrites all current expenses and categories.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" id="importMergeBtn">Merge with existing data</button>
+        <button type="button" class="btn btn-primary" id="importReplaceBtn">Replace existing data</button>
+      </div>
+    </div>
+  </div>
 
   <footer class="app-footer" id="appFooter">
     <p class="footer-text">Personal Expense Tracker &mdash; All data stored locally in your browser.</p>
