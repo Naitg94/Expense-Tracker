@@ -1075,10 +1075,19 @@
 
   function updateDashboard() {
     var t = calculateTotals();
-    dom.amountDaily.textContent = formatCurrency(t.daily);
-    dom.amountWeekly.textContent = formatCurrency(t.weekly);
-    dom.amountMonthly.textContent = formatCurrency(t.monthly);
-    dom.amountYearly.textContent = formatCurrency(t.yearly);
+    var formattedDaily = formatCurrency(t.daily);
+    var formattedWeekly = formatCurrency(t.weekly);
+    var formattedMonthly = formatCurrency(t.monthly);
+    var formattedYearly = formatCurrency(t.yearly);
+
+    dom.amountDaily.textContent = formattedDaily;
+    dom.amountDaily.title = formattedDaily;
+    dom.amountWeekly.textContent = formattedWeekly;
+    dom.amountWeekly.title = formattedWeekly;
+    dom.amountMonthly.textContent = formattedMonthly;
+    dom.amountMonthly.title = formattedMonthly;
+    dom.amountYearly.textContent = formattedYearly;
+    dom.amountYearly.title = formattedYearly;
   }
 
   function findTopCategory() {
@@ -2130,6 +2139,21 @@
       dom.exportPdfBtn.disabled = true;
       dom.exportPdfBtn.title = 'PDF library could not be loaded. Check your internet connection and refresh.';
     }
+
+    // Prevent PC touchpad pinch-to-zoom and Ctrl + Wheel zoom
+    document.addEventListener('wheel', function (e) {
+      if (e.ctrlKey) {
+        e.preventDefault();
+      }
+    }, { passive: false });
+
+    // Prevent Mac/iOS gesture pinch zoom
+    document.addEventListener('gesturestart', function (e) {
+      e.preventDefault();
+    });
+    document.addEventListener('gesturechange', function (e) {
+      e.preventDefault();
+    });
   }
 
   window.addEventListener('DOMContentLoaded', init);

@@ -76,6 +76,8 @@ html {
   scroll-behavior: smooth;
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
@@ -90,6 +92,15 @@ body {
   overflow-x: hidden;
   padding-left: var(--safe-left);
   padding-right: var(--safe-right);
+  touch-action: manipulation;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input, textarea, select, button, .selectable, [contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 @keyframes pageFadeIn {
@@ -605,6 +616,8 @@ select.form-input {
   gap: 6px;
   transition: transform var(--transition), box-shadow var(--transition), background-color var(--transition), border-color var(--transition);
   cursor: default;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .dash-card:hover {
@@ -619,14 +632,22 @@ select.form-input {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   transition: color var(--transition);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .dash-card-amount {
-  font-size: 1.4rem;
+  font-size: clamp(1.05rem, 3.2vw, 1.4rem);
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: -0.02em;
   transition: color var(--transition);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  font-variant-numeric: tabular-nums;
 }
 
 #cardDaily {
@@ -1429,10 +1450,14 @@ select.form-input {
 
   .dash-card {
     padding: 12px 10px;
+    min-width: 0;
   }
 
   .dash-card-amount {
-    font-size: 1.25rem;
+    font-size: clamp(1rem, 4vw, 1.25rem);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .category-form {
@@ -1478,10 +1503,14 @@ select.form-input {
 
   .dash-card {
     padding: 14px 12px;
+    min-width: 0;
   }
 
   .dash-card-amount {
-    font-size: 1.2rem;
+    font-size: clamp(0.95rem, 3.8vw, 1.2rem);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 }
 
