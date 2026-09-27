@@ -1,4 +1,4 @@
-const CACHE_NAME = "expense-tracker-v6";
+const CACHE_NAME = "expense-tracker-v7";
 
 const FILES_TO_CACHE = [
     "./",
@@ -7,7 +7,11 @@ const FILES_TO_CACHE = [
     "./script.js",
     "./manifest.json",
     "./icon-192.png",
-    "./icon-512.png"
+    "./icon-512.png",
+    "./apple-touch-icon.png",
+    "./favicon.ico",
+    "./favicon-32x32.png",
+    "./favicon-16x16.png"
 ];
 
 self.addEventListener("install", event => {
