@@ -5,6 +5,11 @@
      CONSTANTS & STATE
      ================================================================ */
   const STORAGE_KEY = 'expenseTracker';
+  const DB_NAME = 'ExpenseTrackerDB';
+  const DB_VERSION = 1;
+  const STORE_NAME = 'tracker_data';
+  const DATA_KEY = 'current_state';
+
   let data = null;
   let editingId = null;
   let editingCatId = null;
@@ -12,6 +17,180 @@
   let lineChartInstance = null;
   let pendingImportData = null;
   let dom = {};
+
+  /* ================================================================
+     INDEXEDDB STORAGE SERVICE & MIGRATION LAYER
+     ================================================================ */
+  const StorageService = {
+    db: null,
+
+    // Open or create IndexedDB instance
+    async openDB() {
+      if (this.db) return this.db;
+      return new Promise((resolve) => {
+        if (!window.indexedDB) {
+          console.warn('IndexedDB not supported in this browser; using localStorage fallback.');
+          resolve(null);
+          return;
+        }
+
+        try {
+          const request = window.indexedDB.open(DB_NAME, DB_VERSION);
+
+          request.onupgradeneeded = (event) => {
+            const db = event.target.result;
+            if (!db.objectStoreNames.contains(STORE_NAME)) {
+              db.createObjectStore(STORE_NAME);
+            }
+          };
+
+          request.onsuccess = (event) => {
+            this.db = event.target.result;
+            resolve(this.db);
+          };
+
+          request.onerror = (event) => {
+            console.error('IndexedDB open failed:', event.target.error);
+            resolve(null);
+          };
+        } catch (err) {
+          console.error('IndexedDB initialization error:', err);
+          resolve(null);
+        }
+      });
+    },
+
+    // Read state from IndexedDB
+    async getFromIndexedDB() {
+      const db = await this.openDB();
+      if (!db) return null;
+
+      return new Promise((resolve) => {
+        try {
+          const tx = db.transaction(STORE_NAME, 'readonly');
+          const store = tx.objectStore(STORE_NAME);
+          const req = store.get(DATA_KEY);
+
+          req.onsuccess = () => resolve(req.result || null);
+          req.onerror = () => {
+            console.error('IndexedDB read error:', req.error);
+            resolve(null);
+          };
+        } catch (err) {
+          console.error('IndexedDB transaction error:', err);
+          resolve(null);
+        }
+      });
+    },
+
+    // Write state to IndexedDB
+    async saveToIndexedDB(payload) {
+      const db = await this.openDB();
+      if (!db) return false;
+
+      return new Promise((resolve) => {
+        try {
+          const tx = db.transaction(STORE_NAME, 'readwrite');
+          const store = tx.objectStore(STORE_NAME);
+          const req = store.put(payload, DATA_KEY);
+
+          req.onsuccess = () => resolve(true);
+          req.onerror = () => {
+            console.error('IndexedDB write error:', req.error);
+            resolve(false);
+          };
+        } catch (err) {
+          console.error('IndexedDB write transaction error:', err);
+          resolve(false);
+        }
+      });
+    },
+
+    // Load data with automatic migration from localStorage
+    async load() {
+      // 1. Try reading from IndexedDB
+      const dbData = await this.getFromIndexedDB();
+      if (dbData && this.isValidData(dbData)) {
+        return this.sanitizeData(dbData);
+      }
+
+      // 2. Safe migration from existing localStorage
+      const localRaw = localStorage.getItem(STORAGE_KEY);
+      if (localRaw) {
+        try {
+          const parsed = JSON.parse(localRaw);
+          if (this.isValidData(parsed)) {
+            const sanitized = this.sanitizeData(parsed);
+            await this.saveToIndexedDB(sanitized);
+            console.log('Successfully migrated expense data from localStorage to IndexedDB.');
+            return sanitized;
+          }
+        } catch (e) {
+          console.error('Failed to parse localStorage during migration:', e);
+        }
+      }
+
+      // 3. Fresh installation default data
+      const initialData = this.getDefaultData();
+      await this.saveToIndexedDB(initialData);
+      return initialData;
+    },
+
+    // Save data to IndexedDB with localStorage fallback sync
+    async save(payload) {
+      const sanitized = this.sanitizeData(payload);
+      await this.saveToIndexedDB(sanitized);
+
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(sanitized));
+      } catch (e) {
+        // Quota or access error in localStorage; IndexedDB remains primary
+      }
+    },
+
+    isValidData(obj) {
+      return obj && typeof obj === 'object' && (Array.isArray(obj.expenses) || Array.isArray(obj.categories));
+    },
+
+    sanitizeData(raw) {
+      const res = {
+        expenses: Array.isArray(raw.expenses) ? raw.expenses : [],
+        categories: Array.isArray(raw.categories) ? raw.categories : [],
+        settings: raw.settings && typeof raw.settings === 'object' ? raw.settings : { theme: 'light' }
+      };
+      if (!res.settings.theme) res.settings.theme = 'light';
+
+      res.categories.forEach((c) => {
+        if (!Array.isArray(c.subcategories)) c.subcategories = [];
+        if (c.color && (c.color.indexOf('hsl') !== -1 || c.color.indexOf('rgb') !== -1)) {
+          c.color = colorToHex(c.color);
+        }
+      });
+
+      res.expenses.forEach((e) => {
+        if (typeof e.amount === 'string') e.amount = parseFloat(e.amount) || 0;
+        if (typeof e.subcategory !== 'string') e.subcategory = '';
+        if (e.comment && typeof e.comment !== 'string') e.comment = String(e.comment);
+      });
+
+      return res;
+    },
+
+    getDefaultData() {
+      return {
+        expenses: [],
+        categories: [
+          { id: uid(), name: 'Food & Dining', color: colorToHex(nameToColor('Food & Dining')), subcategories: ['Groceries', 'Restaurants', 'Snacks'] },
+          { id: uid(), name: 'Transport', color: colorToHex(nameToColor('Transport')), subcategories: ['Auto-Rickshaw', 'Bus', 'Metro', 'Fuel'] },
+          { id: uid(), name: 'Shopping', color: colorToHex(nameToColor('Shopping')), subcategories: ['Clothes', 'Electronics'] },
+          { id: uid(), name: 'Bills & Utilities', color: colorToHex(nameToColor('Bills & Utilities')), subcategories: ['Electricity', 'Water', 'Internet', 'Mobile Recharge'] },
+          { id: uid(), name: 'Entertainment', color: colorToHex(nameToColor('Entertainment')), subcategories: ['Movies', 'Subscriptions', 'Games'] },
+          { id: uid(), name: 'Health', color: colorToHex(nameToColor('Health')), subcategories: ['Medicines', 'Doctor Visit', 'Gym'] }
+        ],
+        settings: { theme: 'light' }
+      };
+    }
+  };
 
   /* ================================================================
      HELPERS
@@ -56,7 +235,7 @@
     return d.getDay() === 0 || d.getDay() === 6;
   }
 
-  function sumArr(arr) { return arr.reduce(function (s, e) { return s + e.amount; }, 0); }
+  function sumArr(arr) { return arr.reduce(function (s, e) { return s + (parseFloat(e.amount) || 0); }, 0); }
 
   function getCat(id) {
     return data.categories.find(function (c) { return c.id === id; }) || null;
@@ -105,47 +284,20 @@
   }
 
   /* ================================================================
-     DATA MANAGEMENT
+     DATA LOAD & SAVE
      ================================================================ */
-  function loadData() {
-    var raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      try {
-        data = JSON.parse(raw);
-        if (!Array.isArray(data.expenses)) data.expenses = [];
-        if (!Array.isArray(data.categories)) data.categories = [];
-        if (!data.settings) data.settings = { theme: 'light' };
-        data.categories.forEach(function (c) {
-          if (!Array.isArray(c.subcategories)) c.subcategories = [];
-          if (c.color && (c.color.indexOf('hsl') !== -1 || c.color.indexOf('rgb') !== -1)) {
-            c.color = colorToHex(c.color);
-          }
-        });
-      } catch (e) { data = null; }
-    }
-    if (!data) {
-      data = {
-        expenses: [],
-        categories: [
-          { id: uid(), name: 'Food & Dining', color: colorToHex(nameToColor('Food & Dining')), subcategories: ['Groceries', 'Restaurants', 'Snacks'] },
-          { id: uid(), name: 'Transport', color: colorToHex(nameToColor('Transport')), subcategories: ['Auto-Rickshaw', 'Bus', 'Metro', 'Fuel'] },
-          { id: uid(), name: 'Shopping', color: colorToHex(nameToColor('Shopping')), subcategories: ['Clothes', 'Electronics'] },
-          { id: uid(), name: 'Bills & Utilities', color: colorToHex(nameToColor('Bills & Utilities')), subcategories: ['Electricity', 'Water', 'Internet', 'Mobile Recharge'] },
-          { id: uid(), name: 'Entertainment', color: colorToHex(nameToColor('Entertainment')), subcategories: ['Movies', 'Subscriptions', 'Games'] },
-          { id: uid(), name: 'Health', color: colorToHex(nameToColor('Health')), subcategories: ['Medicines', 'Doctor Visit', 'Gym'] }
-        ],
-        settings: { theme: 'light' }
-      };
-      saveData();
-    }
+  async function loadData() {
+    data = await StorageService.load();
   }
 
-  function saveData() { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
+  async function saveData() {
+    await StorageService.save(data);
+  }
 
   /* ================================================================
      CATEGORY MANAGEMENT
      ================================================================ */
-  function addCategory(name, color) {
+  async function addCategory(name, color) {
     var trimmed = name.trim();
     if (!trimmed) { showToast('Category name cannot be empty', 'error'); return false; }
 
@@ -159,13 +311,13 @@
       if (cat) {
         cat.name = trimmed;
         cat.color = color;
-        saveData();
+        await saveData();
         showToast('Category "' + trimmed + '" updated!', 'success');
       }
       cancelCategoryEdit();
     } else {
       data.categories.push({ id: uid(), name: trimmed, color: color, subcategories: [] });
-      saveData();
+      await saveData();
       showToast('Category "' + trimmed + '" added!', 'success');
     }
 
@@ -175,14 +327,14 @@
     return true;
   }
 
-  function deleteCategory(id) {
+  async function deleteCategory(id) {
     var cat = getCat(id);
     var name = cat ? cat.name : 'Category';
     data.categories = data.categories.filter(function (c) { return c.id !== id; });
     var removedCount = data.expenses.filter(function (e) { return e.categoryId === id; }).length;
     data.expenses = data.expenses.filter(function (e) { return e.categoryId !== id; });
     if (editingCatId === id) cancelCategoryEdit();
-    saveData();
+    await saveData();
     refreshAll();
     showToast(name + ' removed' + (removedCount > 0 ? ' along with ' + removedCount + ' expense(s)' : ''), 'success');
   }
@@ -246,7 +398,7 @@
   /* ================================================================
      SUBCATEGORY MANAGEMENT
      ================================================================ */
-  function addSubcategory(categoryId, subName) {
+  async function addSubcategory(categoryId, subName) {
     var trimmed = subName.trim();
     if (!trimmed) { showToast('Subcategory name cannot be empty', 'error'); return false; }
     var cat = getCat(categoryId);
@@ -254,7 +406,7 @@
     var exists = cat.subcategories.some(function (s) { return s.toLowerCase() === trimmed.toLowerCase(); });
     if (exists) { showToast('Subcategory already exists in "' + cat.name + '"', 'error'); return false; }
     cat.subcategories.push(trimmed);
-    saveData();
+    await saveData();
     renderCategories();
     renderSubcategoryManager();
     updateSubcategoryDatalist(dom.expenseCategory.value);
@@ -262,7 +414,7 @@
     return true;
   }
 
-  function deleteSubcategory(categoryId, subName) {
+  async function deleteSubcategory(categoryId, subName) {
     var cat = getCat(categoryId);
     if (!cat) return;
     cat.subcategories = cat.subcategories.filter(function (s) { return s.toLowerCase() !== subName.toLowerCase(); });
@@ -271,7 +423,7 @@
         e.subcategory = '';
       }
     });
-    saveData();
+    await saveData();
     renderCategories();
     renderSubcategoryManager();
     updateSubcategoryDatalist(dom.expenseCategory.value);
@@ -285,7 +437,10 @@
     var cat = getCat(categoryId);
     if (!cat) return;
     var exists = cat.subcategories.some(function (s) { return s.toLowerCase() === trimmed.toLowerCase(); });
-    if (!exists) { cat.subcategories.push(trimmed); saveData(); }
+    if (!exists) {
+      cat.subcategories.push(trimmed);
+      saveData();
+    }
   }
 
   function updateSubcategoryDatalist(categoryId) {
@@ -305,18 +460,18 @@
     var section = $('categorySection');
     var wrapper = document.createElement('div');
     wrapper.id = 'subcategoryManager';
-    wrapper.style.cssText = 'margin-top:24px;padding-top:20px;border-top:1px solid var(--border);';
+    wrapper.className = 'subcategory-manager';
 
     var title = document.createElement('h3');
-    title.style.cssText = 'font-size:0.95rem;font-weight:650;color:var(--text-primary);margin-bottom:14px;';
+    title.className = 'subcategory-title';
     title.textContent = 'Manage Subcategories';
     wrapper.appendChild(title);
 
     var formRow = document.createElement('div');
-    formRow.style.cssText = 'display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end;';
+    formRow.className = 'subcategory-form';
 
     var catGroup = document.createElement('div');
-    catGroup.className = 'form-group';
+    catGroup.className = 'form-group subcat-category-group';
     var catLabel = document.createElement('label');
     catLabel.setAttribute('for', 'subCatCategorySelect');
     catLabel.textContent = 'Select Category';
@@ -327,7 +482,7 @@
     catGroup.appendChild(catSelect);
 
     var subGroup = document.createElement('div');
-    subGroup.className = 'form-group';
+    subGroup.className = 'form-group subcat-name-group';
     var subLabel = document.createElement('label');
     subLabel.setAttribute('for', 'subCatNameInput');
     subLabel.textContent = 'Subcategory Name';
@@ -339,21 +494,23 @@
     subGroup.appendChild(subLabel);
     subGroup.appendChild(subInput);
 
+    var btnGroup = document.createElement('div');
+    btnGroup.className = 'subcat-btn-group';
     var addBtn = document.createElement('button');
     addBtn.type = 'button';
     addBtn.id = 'addSubCatBtn';
-    addBtn.className = 'btn btn-secondary';
+    addBtn.className = 'btn btn-secondary subcat-add-btn';
     addBtn.textContent = '+ Add';
-    addBtn.style.height = '42px';
+    btnGroup.appendChild(addBtn);
 
     formRow.appendChild(catGroup);
     formRow.appendChild(subGroup);
-    formRow.appendChild(addBtn);
+    formRow.appendChild(btnGroup);
     wrapper.appendChild(formRow);
 
     var listContainer = document.createElement('div');
     listContainer.id = 'subCatListContainer';
-    listContainer.style.cssText = 'margin-top:16px;';
+    listContainer.className = 'subcat-list-container';
     wrapper.appendChild(listContainer);
 
     section.appendChild(wrapper);
@@ -542,7 +699,7 @@
   /* ================================================================
      EXPENSE MANAGEMENT (CRUD)
      ================================================================ */
-  function addExpense(amount, categoryId, subcategory, date, comment) {
+  async function addExpense(amount, categoryId, subcategory, date, comment) {
     saveSubcategoryFromExpense(categoryId, subcategory);
     var expObj = {
       id: uid(),
@@ -553,13 +710,13 @@
       createdAt: new Date().toISOString()
     };
     if (comment && comment.trim()) {
-      expObj.comment = comment.trim();
+      expObj.comment = comment.trim().slice(0, 500);
     }
     data.expenses.push(expObj);
-    saveData();
+    await saveData();
   }
 
-  function updateExpense(id, amount, categoryId, subcategory, date, comment) {
+  async function updateExpense(id, amount, categoryId, subcategory, date, comment) {
     saveSubcategoryFromExpense(categoryId, subcategory);
     var idx = data.expenses.findIndex(function (e) { return e.id === id; });
     if (idx !== -1) {
@@ -568,26 +725,29 @@
       data.expenses[idx].subcategory = subcategory.trim();
       data.expenses[idx].date = date;
       if (comment && comment.trim()) {
-        data.expenses[idx].comment = comment.trim();
+        data.expenses[idx].comment = comment.trim().slice(0, 500);
       } else {
         delete data.expenses[idx].comment;
       }
-      saveData();
+      await saveData();
     }
   }
 
-  function deleteExpense(id) {
+
+
+  async function deleteExpense(id) {
     data.expenses = data.expenses.filter(function (e) { return e.id !== id; });
-    saveData();
+    if (editingId === id) cancelEdit();
+    await saveData();
     refreshAll();
     showToast('Expense deleted', 'success');
   }
 
-  function deleteExpenseNote(id) {
+  async function deleteExpenseNote(id) {
     var exp = data.expenses.find(function (e) { return e.id === id; });
     if (exp && exp.comment) {
       delete exp.comment;
-      saveData();
+      await saveData();
       refreshAll();
       showToast('Note removed', 'success');
     }
@@ -630,6 +790,7 @@
     editingId = null;
     dom.expenseForm.reset();
     dom.expenseDate.value = todayStr();
+    dom.expenseDate.max = todayStr();
     collapseNoteBox();
     dom.addExpenseBtn.textContent = 'Add Expense';
     clearInputErrors();
@@ -646,25 +807,59 @@
   async function handleExpenseSubmit(e) {
     e.preventDefault();
 
-    var amount = dom.expenseAmount.value;
+    var rawAmount = dom.expenseAmount.value.trim();
     var categoryId = dom.expenseCategory.value;
-    var subcategory = dom.expenseSubcategory.value;
+    var subcategory = dom.expenseSubcategory.value.trim();
     var date = dom.expenseDate.value;
-    var comment = dom.noteContainer.classList.contains('collapsed') ? '' : dom.expenseNote.value;
+    var comment = dom.noteContainer.classList.contains('collapsed') ? '' : dom.expenseNote.value.trim();
 
     clearInputErrors();
-    var valid = true;
-    if (!amount || parseFloat(amount) <= 0) { dom.expenseAmount.classList.add('input-error'); valid = false; }
-    if (!categoryId || categoryId === ADD_NEW_CAT()) { dom.expenseCategory.classList.add('input-error'); valid = false; }
-    if (!date) { dom.expenseDate.classList.add('input-error'); valid = false; }
-    if (!valid) { showToast('Please fill in all required fields', 'error'); return; }
+
+    var amount = parseFloat(rawAmount);
+    if (!rawAmount || isNaN(amount) || amount <= 0 || !isFinite(amount)) {
+      dom.expenseAmount.classList.add('input-error');
+      dom.expenseAmount.focus();
+      showToast('Please enter a valid amount greater than 0', 'error');
+      return;
+    }
+    // Limit amount to maximum of 10 digits in logic
+    var integerDigits = rawAmount.split('.')[0].replace(/\D/g, '');
+    if (integerDigits.length > 10 || amount > 9999999999.99) {
+      dom.expenseAmount.classList.add('input-error');
+      dom.expenseAmount.focus();
+      showToast('Amount cannot exceed 10 digits', 'error');
+      return;
+    }
+    // Round to 2 decimal places
+    amount = Math.round(amount * 100) / 100;
+
+    if (!categoryId || categoryId === ADD_NEW_CAT() || !getCat(categoryId)) {
+      dom.expenseCategory.classList.add('input-error');
+      dom.expenseCategory.focus();
+      showToast('Please select a valid category', 'error');
+      return;
+    }
+
+    if (!date || isNaN(new Date(date + 'T00:00:00').getTime())) {
+      dom.expenseDate.classList.add('input-error');
+      dom.expenseDate.focus();
+      showToast('Please select a valid date', 'error');
+      return;
+    }
+
+    if (date > todayStr()) {
+      dom.expenseDate.classList.add('input-error');
+      dom.expenseDate.focus();
+      showToast('Future dates are not allowed', 'error');
+      return;
+    }
 
     if (editingId) {
-      updateExpense(editingId, amount, categoryId, subcategory, date, comment);
+      await updateExpense(editingId, amount, categoryId, subcategory, date, comment);
       showToast('Expense updated', 'success');
       cancelEdit();
     } else {
-      addExpense(amount, categoryId, subcategory, date, comment);
+      await addExpense(amount, categoryId, subcategory, date, comment);
       showToast('Expense added', 'success');
       dom.expenseForm.reset();
       dom.expenseDate.value = todayStr();
@@ -699,12 +894,12 @@
     var isEmpty = filtered.length === 0;
     dom.emptyState.classList.toggle('hidden', !isEmpty);
 
-    if (window.innerWidth >= 768) {
-      dom.expenseTableWrapper.style.display = isEmpty ? 'none' : '';
+    if (isEmpty) {
+      dom.expenseTableWrapper.style.display = 'none';
       dom.expenseCards.style.display = 'none';
     } else {
-      dom.expenseTableWrapper.style.display = 'none';
-      dom.expenseCards.style.display = isEmpty ? 'none' : '';
+      dom.expenseTableWrapper.style.display = '';
+      dom.expenseCards.style.display = '';
     }
     renderTable(filtered);
     renderCards(filtered);
@@ -730,7 +925,8 @@
       toggleBtn.className = 'btn-inline-text';
       toggleBtn.type = 'button';
       toggleBtn.textContent = 'show more';
-      toggleBtn.addEventListener('click', function () {
+      toggleBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
         var isClamped = noteText.classList.toggle('clamped');
         toggleBtn.textContent = isClamped ? 'show more' : 'show less';
       });
@@ -868,7 +1064,7 @@
     var today = todayStr(), wStart = weekStartStr(), mStart = monthStartStr(), yStart = yearStartStr();
     var daily = 0, weekly = 0, monthly = 0, yearly = 0;
     data.expenses.forEach(function (e) {
-      var a = e.amount;
+      var a = parseFloat(e.amount) || 0;
       if (e.date === today) daily += a;
       if (e.date >= wStart) weekly += a;
       if (e.date >= mStart) monthly += a;
@@ -888,7 +1084,10 @@
   function findTopCategory() {
     if (data.expenses.length === 0) return null;
     var map = {};
-    data.expenses.forEach(function (e) { map[e.categoryId] = (map[e.categoryId] || 0) + e.amount; });
+    data.expenses.forEach(function (e) {
+      var a = parseFloat(e.amount) || 0;
+      map[e.categoryId] = (map[e.categoryId] || 0) + a;
+    });
     var topId = null, topAmt = 0;
     Object.keys(map).forEach(function (id) { if (map[id] > topAmt) { topAmt = map[id]; topId = id; } });
     return topId ? { category: getCat(topId), amount: topAmt } : null;
@@ -897,7 +1096,10 @@
   function findHighestSpendingDay() {
     if (data.expenses.length === 0) return null;
     var map = {};
-    data.expenses.forEach(function (e) { map[e.date] = (map[e.date] || 0) + e.amount; });
+    data.expenses.forEach(function (e) {
+      var a = parseFloat(e.amount) || 0;
+      map[e.date] = (map[e.date] || 0) + a;
+    });
     var topDate = null, topAmt = 0;
     Object.keys(map).forEach(function (d) { if (map[d] > topAmt) { topAmt = map[d]; topDate = d; } });
     return topDate ? { date: topDate, amount: topAmt } : null;
@@ -917,7 +1119,7 @@
   }
 
   function detectFrequentSmallExpenses() {
-    return data.expenses.filter(function (e) { return e.date >= daysAgoStr(30) && e.amount <= 10; }).length;
+    return data.expenses.filter(function (e) { return e.date >= daysAgoStr(30) && (parseFloat(e.amount) || 0) <= 10; }).length;
   }
 
   function detectTimePatterns() {
@@ -926,7 +1128,7 @@
       if (!e.createdAt) return;
       var h = new Date(e.createdAt).getHours(), k;
       if (h >= 5 && h < 12) k = 'morning'; else if (h >= 12 && h < 17) k = 'afternoon'; else if (h >= 17 && h < 22) k = 'evening'; else k = 'night';
-      p[k].count++; p[k].total += e.amount;
+      p[k].count++; p[k].total += (parseFloat(e.amount) || 0);
     });
     return { sorted: Object.keys(p).map(function (k) { return { name: k, count: p[k].count }; }).sort(function (a, b) { return b.count - a.count; }) };
   }
@@ -934,7 +1136,10 @@
   function detectWeekendVsWeekday() {
     var recent = data.expenses.filter(function (e) { return e.date >= daysAgoStr(30); });
     var wE = { t: 0, c: 0 }, wD = { t: 0, c: 0 };
-    recent.forEach(function (e) { if (isWeekend(e.date)) { wE.t += e.amount; wE.c++; } else { wD.t += e.amount; wD.c++; } });
+    recent.forEach(function (e) {
+      var a = parseFloat(e.amount) || 0;
+      if (isWeekend(e.date)) { wE.t += a; wE.c++; } else { wD.t += a; wD.c++; }
+    });
     return { weekendTotal: wE.t, weekendCount: wE.c, weekdayTotal: wD.t, weekdayCount: wD.c };
   }
 
@@ -993,7 +1198,10 @@
   function renderPieChart() {
     if (typeof Chart === 'undefined') return;
     var catTotals = {};
-    data.expenses.forEach(function (e) { catTotals[e.categoryId] = (catTotals[e.categoryId] || 0) + e.amount; });
+    data.expenses.forEach(function (e) {
+      var a = parseFloat(e.amount) || 0;
+      catTotals[e.categoryId] = (catTotals[e.categoryId] || 0) + a;
+    });
     var labels = [], values = [], colors = [];
     Object.keys(catTotals).forEach(function (id) {
       var cat = getCat(id);
@@ -1021,7 +1229,7 @@
     for (var i = 29; i >= 0; i--) {
       var dateStr = daysAgoStr(i);
       labels.push(new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
-      values.push(data.expenses.filter(function (e) { return e.date === dateStr; }).reduce(function (s, e) { return s + e.amount; }, 0));
+      values.push(data.expenses.filter(function (e) { return e.date === dateStr; }).reduce(function (s, e) { return s + (parseFloat(e.amount) || 0); }, 0));
     }
     if (lineChartInstance) lineChartInstance.destroy();
     var isDark = document.documentElement.classList.contains('dark');
@@ -1039,62 +1247,15 @@
     });
   }
 
-  /* ================================================================
-     HEATMAP & TOOLTIP
-     ================================================================ */
-  function renderHeatmap() {
-    var grid = dom.heatmapGrid;
-    grid.innerHTML = '';
-    var totalDays = 35, dailyTotals = {}, maxAmount = 0;
-    for (var i = totalDays - 1; i >= 0; i--) {
-      var ds = daysAgoStr(i);
-      var total = data.expenses.filter(function (e) { return e.date === ds; }).reduce(function (s, e) { return s + e.amount; }, 0);
-      dailyTotals[ds] = total;
-      if (total > maxAmount) maxAmount = total;
-    }
 
-    var tooltip = $('heatmapTooltip');
-    if (!tooltip) {
-      tooltip = document.createElement('div');
-      tooltip.id = 'heatmapTooltip';
-      tooltip.className = 'heatmap-tooltip';
-      document.body.appendChild(tooltip);
-    }
-
-    for (var j = totalDays - 1; j >= 0; j--) {
-      var dateStr = daysAgoStr(j), amt = dailyTotals[dateStr];
-      var cell = document.createElement('div');
-      cell.className = 'heatmap-cell';
-      cell.dataset.tooltip = formatDateShort(dateStr) + ': ' + formatCurrency(amt);
-
-      if (maxAmount > 0 && amt > 0) {
-        var r = amt / maxAmount;
-        cell.classList.add(r >= 0.75 ? 'level-4' : r >= 0.5 ? 'level-3' : r >= 0.25 ? 'level-2' : 'level-1');
-      }
-
-      cell.addEventListener('mouseenter', function (e) {
-        tooltip.textContent = this.dataset.tooltip;
-        tooltip.classList.add('visible');
-        var rect = this.getBoundingClientRect();
-        tooltip.style.left = (rect.left + rect.width / 2 - tooltip.offsetWidth / 2) + 'px';
-        tooltip.style.top = (rect.top - tooltip.offsetHeight - 6) + 'px';
-      });
-
-      cell.addEventListener('mouseleave', function () {
-        tooltip.classList.remove('visible');
-      });
-
-      grid.appendChild(cell);
-    }
-  }
 
   /* ================================================================
      DARK MODE
      ================================================================ */
-  function toggleTheme() {
+  async function toggleTheme() {
     var isDark = document.documentElement.classList.toggle('dark');
     data.settings.theme = isDark ? 'dark' : 'light';
-    saveData();
+    await saveData();
     applyTheme(data.settings.theme);
     renderPieChart();
     renderLineChart();
@@ -1106,12 +1267,12 @@
   }
 
   /* ================================================================
-     EXPORT PDF
+     PDF EXPORT (PRODUCTION QUALITY & RE-IMPORTABLE)
      ================================================================ */
   function generatePDF() {
     try {
       if (typeof window.jspdf === 'undefined' || !window.jspdf.jsPDF) {
-        showToast('PDF library not loaded — refresh the page.', 'error');
+        showToast('PDF library not loaded — please check connection and refresh.', 'error');
         return;
       }
 
@@ -1120,198 +1281,194 @@
       var ph = doc.internal.pageSize.getHeight();
       var mg = 14;
       var cw = pw - mg * 2;
-      var pdfCur = function(n) { return 'Rs. ' + Number(n).toFixed(2); };
+      var pdfCur = function (n) { return 'Rs. ' + Number(n).toFixed(2); };
 
       function hexRgb(hex) {
         hex = (hex || '#6b7280').replace('#', '');
-        if (hex.length === 3) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
-        return [parseInt(hex.substring(0,2),16), parseInt(hex.substring(2,4),16), parseInt(hex.substring(4,6),16)];
+        if (hex.length === 3) hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+        return [parseInt(hex.substring(0, 2), 16), parseInt(hex.substring(2, 4), 16), parseInt(hex.substring(4, 6), 16)];
       }
 
-      var now = new Date();
-      var mStart = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0') + '-01';
-      var monthLabel = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-      var monthFile = now.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }).toLowerCase().replace(/\s+/g, '-');
-      var monthlyExp = data.expenses.filter(function(e){ return e.date >= mStart; });
-      monthlyExp.sort(function(a,b){ return b.date.localeCompare(a.date); });
-      var totalMonth = monthlyExp.reduce(function(s,e){ return s + e.amount; }, 0);
+      var allExp = data.expenses.slice();
+      allExp.sort(function (a, b) {
+        if (b.date !== a.date) return b.date.localeCompare(a.date);
+        return (b.createdAt || '').localeCompare(a.createdAt || '');
+      });
 
-      var daysElapsed = now.getDate();
-      var avgDaily = daysElapsed > 0 ? totalMonth / daysElapsed : 0;
+      var totalAll = sumArr(allExp);
+      var t = calculateTotals();
 
-      function drawFooter() {
-        var pn = doc.internal.getNumberOfPages();
-        for (var p = 1; p <= pn; p++) {
-          doc.setPage(p);
-          doc.setFillColor(99, 102, 241);
-          doc.rect(0, ph - 7, pw, 7, 'F');
-          doc.setFontSize(7);
-          doc.setFont('helvetica', 'normal');
-          doc.setTextColor(255);
-          doc.text('Expense Tracker  |  Monthly Report', mg, ph - 2.5);
-          doc.text('Page ' + p + ' of ' + pn, pw - mg, ph - 2.5, { align: 'right' });
-        }
-      }
-
+      // Top Accent Bars
       doc.setFillColor(99, 102, 241);
       doc.rect(0, 0, pw, 5, 'F');
       doc.setFillColor(245, 158, 11);
-      doc.rect(0, 5, pw, 1, 'F');
+      doc.rect(0, 5, pw, 1.5, 'F');
 
+      // Title & Header Information
       var y = 18;
-      doc.setFontSize(24);
+      doc.setFontSize(22);
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(30, 30, 60);
-      doc.text('Monthly Expense Report', mg, y);
+      doc.text('Expense Tracker Statement', mg, y);
 
       y += 8;
       doc.setFillColor(99, 102, 241);
-      doc.roundedRect(mg, y - 4, 42, 7, 2, 2, 'F');
-      doc.setFontSize(9);
+      doc.roundedRect(mg, y - 4, 38, 7, 2, 2, 'F');
+      doc.setFontSize(8.5);
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(255);
-      doc.text(monthLabel, mg + 5, y);
+      doc.text('FULL STATEMENT', mg + 4, y);
 
       y += 6;
       doc.setFontSize(8.5);
       doc.setFont('helvetica', 'normal');
-      doc.setTextColor(140);
-      doc.text('Generated: ' + new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
-        + '  |  Total entries: ' + monthlyExp.length, mg, y);
+      doc.setTextColor(130);
+      var dateRangeText = allExp.length > 0 ? ('Entries from ' + formatDateShort(allExp[allExp.length - 1].date) + ' to ' + formatDateShort(allExp[0].date)) : 'No entries yet';
+      doc.text('Generated: ' + new Date().toLocaleDateString('en-US', { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })
+        + '  |  ' + allExp.length + ' transaction(s)  |  ' + dateRangeText, mg, y);
 
       y += 5;
-      doc.setDrawColor(230);
+      doc.setDrawColor(226, 232, 240);
       doc.setLineWidth(0.4);
       doc.line(mg, y, pw - mg, y);
 
+      // Summary Cards (4 across)
       y += 6;
       var cardH = 26;
       var cardGap = 5;
       var cardW = (cw - cardGap * 3) / 4;
-      var t = calculateTotals();
 
       var cards = [
-        { label: 'TODAY', value: pdfCur(t.daily), accent: [16, 185, 129] },
-        { label: 'THIS WEEK', value: pdfCur(t.weekly), accent: [99, 102, 241] },
+        { label: 'TOTAL SPENT', value: pdfCur(totalAll), accent: [99, 102, 241] },
         { label: 'THIS MONTH', value: pdfCur(t.monthly), accent: [245, 158, 11] },
-        { label: 'AVG / DAY', value: pdfCur(avgDaily), accent: [239, 68, 68] }
+        { label: 'THIS WEEK', value: pdfCur(t.weekly), accent: [16, 185, 129] },
+        { label: 'TODAY', value: pdfCur(t.daily), accent: [239, 68, 68] }
       ];
 
-      cards.forEach(function(card, i) {
+      cards.forEach(function (card, i) {
         var cx = mg + i * (cardW + cardGap);
-        doc.setFillColor(235, 237, 243);
-        doc.roundedRect(cx + 0.5, y + 0.5, cardW, cardH, 3, 3, 'F');
-        doc.setFillColor(250, 251, 254);
-        doc.roundedRect(cx, y, cardW, cardH, 3, 3, 'F');
+        doc.setFillColor(235, 237, 245);
+        doc.roundedRect(cx + 0.5, y + 0.5, cardW, cardH, 2.5, 2.5, 'F');
+        doc.setFillColor(252, 252, 254);
+        doc.roundedRect(cx, y, cardW, cardH, 2.5, 2.5, 'F');
         doc.setFillColor(card.accent[0], card.accent[1], card.accent[2]);
         doc.rect(cx, y, cardW, 2.5, 'F');
         doc.setFontSize(6.5);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(card.accent[0], card.accent[1], card.accent[2]);
-        doc.text(card.label, cx + 6, y + 11);
-        doc.setFontSize(11);
+        doc.text(card.label, cx + 5, y + 10.5);
+        doc.setFontSize(10.5);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(30, 30, 60);
-        doc.text(card.value, cx + 6, y + 21);
+        doc.text(card.value, cx + 5, y + 20.5);
       });
 
+      // Category Breakdown with progress bars
       var catTotals = {};
-      monthlyExp.forEach(function(e){ catTotals[e.categoryId] = (catTotals[e.categoryId] || 0) + e.amount; });
+      allExp.forEach(function (e) {
+        var a = parseFloat(e.amount) || 0;
+        catTotals[e.categoryId] = (catTotals[e.categoryId] || 0) + a;
+      });
 
-      var catEntries = Object.keys(catTotals).map(function(id){
+      var catEntries = Object.keys(catTotals).map(function (id) {
         var cat = getCat(id);
-        return { name: cat ? cat.name : 'Unknown', color: cat ? cat.color : '#6b7280', amount: catTotals[id] };
-      }).sort(function(a,b){ return b.amount - a.amount; });
+        var count = allExp.filter(function (e) { return e.categoryId === id; }).length;
+        return {
+          name: cat ? cat.name : 'Unknown',
+          color: cat ? cat.color : '#6b7280',
+          amount: catTotals[id],
+          count: count
+        };
+      }).sort(function (a, b) { return b.amount - a.amount; });
 
-      y += cardH + 12;
-      doc.setFontSize(13);
+      y += cardH + 11;
+      doc.setFontSize(12.5);
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(30, 30, 60);
       doc.text('Category Breakdown', mg, y);
 
       y += 3;
-      doc.setDrawColor(230);
+      doc.setDrawColor(226, 232, 240);
       doc.setLineWidth(0.3);
       doc.line(mg, y, pw - mg, y);
-      y += 7;
+      y += 6;
 
-      var barMaxW = cw * 0.42;
-      var barH = 6;
+      var barMaxW = cw * 0.44;
+      var barH = 5.5;
 
-      catEntries.forEach(function(entry) {
-        if (y > 258) {
+      catEntries.forEach(function (entry) {
+        if (y > ph - 30) {
           doc.addPage();
           y = 18;
-          doc.setFontSize(13);
+          doc.setFontSize(12);
           doc.setFont('helvetica', 'bold');
           doc.setTextColor(30, 30, 60);
           doc.text('Category Breakdown (continued)', mg, y);
           y += 3;
-          doc.setDrawColor(230);
+          doc.setDrawColor(226, 232, 240);
           doc.line(mg, y, pw - mg, y);
-          y += 7;
+          y += 6;
         }
 
-        var pct = totalMonth > 0 ? (entry.amount / totalMonth) * 100 : 0;
-        var barW = totalMonth > 0 ? (entry.amount / totalMonth) * barMaxW : 0;
+        var pct = totalAll > 0 ? (entry.amount / totalAll) * 100 : 0;
+        var barW = totalAll > 0 ? (entry.amount / totalAll) * barMaxW : 0;
 
-        doc.setFontSize(9);
+        doc.setFontSize(8.5);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(50, 50, 70);
         doc.text(entry.name, mg, y);
 
         doc.setFont('helvetica', 'normal');
-        doc.setTextColor(140);
-        doc.text(pct.toFixed(1) + '%', mg + 52, y);
+        doc.setTextColor(130);
+        doc.text(pct.toFixed(1) + '% (' + entry.count + ' tx)', mg + 55, y);
 
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(50, 50, 70);
         doc.text(pdfCur(entry.amount), pw - mg, y, { align: 'right' });
 
-        y += 3;
-        doc.setFillColor(235, 237, 245);
+        y += 2.5;
+        doc.setFillColor(238, 240, 248);
         doc.roundedRect(mg, y, barMaxW, barH, 2, 2, 'F');
 
         if (barW > 1) {
           var rgb = hexRgb(entry.color);
           doc.setFillColor(rgb[0], rgb[1], rgb[2]);
-          doc.roundedRect(mg, y, Math.max(5, barW), barH, 2, 2, 'F');
+          doc.roundedRect(mg, y, Math.max(4, barW), barH, 2, 2, 'F');
         }
 
-        y += barH + 9;
+        y += barH + 8;
       });
 
       if (catEntries.length > 0) {
-        doc.setDrawColor(180);
+        doc.setDrawColor(180, 185, 200);
         doc.setLineWidth(0.5);
-        doc.line(mg, y - 5, pw - mg, y - 5);
-        doc.setLineWidth(0.2);
-        doc.line(mg, y - 3.5, pw - mg, y - 3.5);
-        doc.setFontSize(11);
+        doc.line(mg, y - 4, pw - mg, y - 4);
+        doc.setFontSize(10.5);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(30, 30, 60);
         doc.text('Grand Total', mg, y + 3);
-        doc.text(pdfCur(totalMonth), pw - mg, y + 3, { align: 'right' });
-        y += 14;
+        doc.text(pdfCur(totalAll), pw - mg, y + 3, { align: 'right' });
+        y += 12;
       }
 
-      if (monthlyExp.length > 0) {
-        if (y > 215) { doc.addPage(); y = 18; }
+      // Detailed Transaction Table (Multi-page with headers)
+      if (allExp.length > 0) {
+        if (y > ph - 45) { doc.addPage(); y = 18; }
 
-        doc.setFontSize(13);
+        doc.setFontSize(12.5);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(30, 30, 60);
         doc.text('Transaction Details', mg, y);
 
         y += 3;
-        doc.setDrawColor(230);
+        doc.setDrawColor(226, 232, 240);
         doc.setLineWidth(0.3);
         doc.line(mg, y, pw - mg, y);
         y += 6;
 
         var colDate = mg;
         var colCat = mg + 30;
-        var colSub = mg + 82;
+        var colSub = mg + 80;
         var colAmtR = pw - mg;
         var rowH = 7.5;
 
@@ -1334,7 +1491,18 @@
           var cat = getCat(exp.categoryId);
           var rgb = cat && cat.color ? hexRgb(cat.color) : [107, 114, 128];
           var hasNote = !!exp.comment;
-          var curRowH = hasNote ? rowH + 4.5 : rowH;
+
+          // Wrap long notes if necessary so they never overflow
+          var noteLines = [];
+          var noteExtraH = 0;
+          if (hasNote) {
+            doc.setFontSize(7);
+            doc.setFont('helvetica', 'italic');
+            noteLines = doc.splitTextToSize('Note: ' + exp.comment, cw - 40);
+            noteExtraH = noteLines.length * 3.6;
+          }
+
+          var curRowH = rowH + noteExtraH;
 
           if (idx % 2 === 0) {
             doc.setFillColor(248, 249, 253);
@@ -1346,34 +1514,34 @@
 
           doc.setFontSize(8);
           doc.setFont('helvetica', 'normal');
-          doc.setTextColor(100);
+          doc.setTextColor(90);
           doc.text(formatDateShort(exp.date), colDate + 3, ry + 5);
 
-          doc.setTextColor(50);
+          doc.setTextColor(40);
           doc.setFont('helvetica', 'bold');
           doc.text(cat ? cat.name : 'Unknown', colCat + 6, ry + 5);
 
           doc.setFont('helvetica', 'normal');
-          doc.setTextColor(150);
+          doc.setTextColor(140);
           doc.text(exp.subcategory || '\u2014', colSub + 3, ry + 5);
 
           doc.setFont('helvetica', 'bold');
-          doc.setTextColor(50);
+          doc.setTextColor(40);
           doc.text(pdfCur(exp.amount), colAmtR - 3, ry + 5, { align: 'right' });
 
-          if (hasNote) {
+          if (hasNote && noteLines.length > 0) {
             doc.setFontSize(7);
             doc.setFont('helvetica', 'italic');
-            doc.setTextColor(130);
-            doc.text('Note: ' + exp.comment, colCat + 6, ry + 9.5);
+            doc.setTextColor(120);
+            doc.text(noteLines, colCat + 6, ry + 9.5);
           }
 
           return ry + curRowH;
         }
 
-        monthlyExp.forEach(function(exp, idx) {
-          var neededH = exp.comment ? rowH + 4.5 : rowH;
-          if (y + neededH > ph - 18) {
+        allExp.forEach(function (exp, idx) {
+          var estH = exp.comment ? 15 : rowH;
+          if (y + estH > ph - 18) {
             doc.addPage();
             y = 18;
             y = drawTableHeader(y);
@@ -1381,34 +1549,90 @@
           y = drawRow(exp, idx, y);
         });
 
-        doc.setDrawColor(200);
+        doc.setDrawColor(200, 205, 220);
         doc.setLineWidth(0.3);
         doc.line(mg, y, pw - mg, y);
         y += 3;
 
         doc.setFontSize(7);
         doc.setFont('helvetica', 'italic');
-        doc.setTextColor(160);
-        doc.text(monthlyExp.length + ' transaction' + (monthlyExp.length !== 1 ? 's' : '') + ' in ' + monthLabel, mg, y);
+        doc.setTextColor(150);
+        doc.text(allExp.length + ' total transaction(s) documented', mg, y);
       } else {
         y += 10;
-        doc.setDrawColor(200);
+        doc.setDrawColor(200, 205, 220);
         doc.setLineWidth(0.3);
         doc.setLineDashPattern([3, 3], 0);
-        doc.roundedRect(mg + 20, y - 5, cw - 40, 30, 4, 4, 'S');
+        doc.roundedRect(mg + 20, y - 5, cw - 40, 28, 4, 4, 'S');
         doc.setLineDashPattern([], 0);
-        doc.setFontSize(11);
+        doc.setFontSize(10.5);
         doc.setFont('helvetica', 'bold');
-        doc.setTextColor(160);
-        doc.text('No expenses recorded for ' + monthLabel, pw / 2, y + 6, { align: 'center' });
-        doc.setFontSize(8.5);
+        doc.setTextColor(150);
+        doc.text('No expenses recorded yet', pw / 2, y + 7, { align: 'center' });
+        doc.setFontSize(8);
         doc.setFont('helvetica', 'normal');
-        doc.text('Start adding expenses to see them here in your monthly report.', pw / 2, y + 15, { align: 'center' });
+        doc.text('Start adding expenses to view detailed report entries.', pw / 2, y + 16, { align: 'center' });
       }
 
-      drawFooter();
-      doc.save('expense-report-' + monthFile + '.pdf');
-      showToast('PDF exported for ' + monthLabel, 'success');
+      // Page numbers and footer on all pages
+      var pn = doc.internal.getNumberOfPages();
+      for (var p = 1; p <= pn; p++) {
+        doc.setPage(p);
+        doc.setFillColor(99, 102, 241);
+        doc.rect(0, ph - 6.5, pw, 6.5, 'F');
+        doc.setFontSize(7);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(255);
+        doc.text('Expense Tracker | Personal Financial Statement', mg, ph - 2.2);
+        doc.text('Page ' + p + ' of ' + pn, pw - mg, ph - 2.2, { align: 'right' });
+      }
+
+      // Metadata properties for document recognition
+      doc.setDocumentProperties({
+        title: 'Expense Tracker Statement',
+        subject: 'Expense Tracker Export Data',
+        author: 'Expense Tracker',
+        keywords: 'ExpenseTrackerPDF,Statement',
+        creator: 'Expense Tracker Web App'
+      });
+
+      // Embed structured machine-readable payload in comment block
+      var exportPayload = {
+        generator: 'ExpenseTrackerApp',
+        version: '2.0',
+        exportedAt: new Date().toISOString(),
+        expenses: data.expenses,
+        categories: data.categories,
+        settings: data.settings
+      };
+
+      var jsonStr = JSON.stringify(exportPayload);
+      var base64Data = btoa(encodeURIComponent(jsonStr).replace(/%([0-9A-F]{2})/g, function (match, p1) {
+        return String.fromCharCode('0x' + p1);
+      }));
+
+      var rawPdfBlob = doc.output('blob');
+      var markerText = '\n%=== EXPENSE_TRACKER_PDF_DATA_START ===%\n%' + base64Data + '\n%=== EXPENSE_TRACKER_PDF_DATA_END ===%\n';
+      var finalPdfBlob = new Blob([rawPdfBlob, markerText], { type: 'application/pdf' });
+      var filename = 'expense-report-' + todayStr() + '.pdf';
+
+      if (window.navigator && window.navigator.msSaveOrOpenBlob) {
+        window.navigator.msSaveOrOpenBlob(finalPdfBlob, filename);
+      } else {
+        var downloadUrl = URL.createObjectURL(finalPdfBlob);
+        var a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = filename;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(function () {
+          if (a.parentNode) a.parentNode.removeChild(a);
+          URL.revokeObjectURL(downloadUrl);
+        }, 1000);
+      }
+
+      showToast('PDF exported successfully', 'success');
     } catch (err) {
       console.error('PDF export error:', err);
       showToast('Failed to generate PDF: ' + err.message, 'error');
@@ -1416,29 +1640,8 @@
   }
 
   /* ================================================================
-     EXPORT JSON & IMPORT (JSON / CSV)
+     PDF IMPORT
      ================================================================ */
-  function exportJSON() {
-    var backup = {
-      version: '1.0',
-      exportedAt: new Date().toISOString(),
-      expenses: data.expenses,
-      categories: data.categories,
-      settings: data.settings
-    };
-    var str = JSON.stringify(backup, null, 2);
-    var blob = new Blob([str], { type: 'application/json' });
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement('a');
-    a.href = url;
-    a.download = 'expense-tracker-backup-' + todayStr() + '.json';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    showToast('Backup exported as JSON', 'success');
-  }
-
   function handleImportClick() {
     dom.importFileInput.click();
   }
@@ -1447,19 +1650,29 @@
     var file = e.target.files && e.target.files[0];
     if (!file) return;
 
+    var nameLower = (file.name || '').toLowerCase();
+    var isPdf = nameLower.endsWith('.pdf') || file.type === 'application/pdf';
+    var isJson = nameLower.endsWith('.json') || file.type === 'application/json';
+
+    if (!isPdf && !isJson) {
+      showToast('Please select a valid PDF (.pdf) or backup (.json) file', 'error');
+      dom.importFileInput.value = '';
+      return;
+    }
+
     var reader = new FileReader();
     reader.onload = function (evt) {
       var content = evt.target.result;
-      var parsed = parseImportContent(file.name, content);
+      var parsed = parseImportPdf(content);
 
-      if (!parsed || (parsed.expenses.length === 0 && parsed.skippedCount === 0)) {
-        showToast('Invalid or empty file format', 'error');
+      if (!parsed) {
+        showToast('Invalid or unsupported file. Please import a PDF or backup exported from Expense Tracker.', 'error');
         dom.importFileInput.value = '';
         return;
       }
 
       if (parsed.expenses.length === 0) {
-        showToast('No valid expenses found. ' + parsed.skippedCount + ' row(s) skipped.', 'error');
+        showToast('No valid expense records found in this file.', 'error');
         dom.importFileInput.value = '';
         return;
       }
@@ -1467,135 +1680,107 @@
       pendingImportData = parsed;
       var count = parsed.expenses.length;
       var skipText = parsed.skippedCount > 0 ? ' (' + parsed.skippedCount + ' bad row' + (parsed.skippedCount > 1 ? 's' : '') + ' skipped)' : '';
-      dom.importSummaryText.textContent = 'Found ' + count + ' valid expense' + (count === 1 ? '' : 's') + ' in file' + skipText + '. How would you like to proceed?';
+      dom.importSummaryText.textContent = 'Found ' + count + ' valid expense' + (count === 1 ? '' : 's') + ' in this file' + skipText + '. How would you like to proceed?';
       openImportModal();
       dom.importFileInput.value = '';
     };
+
     reader.onerror = function () {
-      showToast('Error reading file', 'error');
+      showToast('Error reading the selected file', 'error');
       dom.importFileInput.value = '';
     };
-    reader.readAsText(file);
+
+    if (isJson) {
+      reader.readAsText(file, 'UTF-8');
+    } else {
+      reader.readAsText(file, 'latin1');
+    }
   }
 
-  function parseImportContent(filename, text) {
-    var ext = filename.split('.').pop().toLowerCase();
-    var skippedCount = 0;
-    var parsedExpenses = [];
-    var parsedCategories = [];
+  function parseImportPdf(text) {
+    if (!text || typeof text !== 'string') return null;
 
-    text = text.trim();
-    if (!text) return null;
+    var json = null;
 
-    if (ext === 'json' || text.startsWith('{') || text.startsWith('[')) {
+    // 1. Check if direct JSON string
+    var trimmed = text.trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
       try {
-        var json = JSON.parse(text);
-        var rawExpenses = [];
-        if (Array.isArray(json)) {
-          rawExpenses = json;
-        } else if (typeof json === 'object' && json !== null) {
-          if (Array.isArray(json.expenses)) rawExpenses = json.expenses;
-          if (Array.isArray(json.categories)) parsedCategories = json.categories;
-        } else {
-          return null;
+        var directJson = JSON.parse(trimmed);
+        if (directJson && typeof directJson === 'object' && (Array.isArray(directJson.expenses) || Array.isArray(directJson.categories))) {
+          json = directJson;
         }
+      } catch (e) {}
+    }
 
-        rawExpenses.forEach(function (item) {
-          var date = item.date || item.Date;
-          var amount = parseFloat(item.amount !== undefined ? item.amount : item.Amount);
-          var catName = item.category || item.Category || item.categoryName || '';
-          var catId = item.categoryId || '';
-          var subcat = item.subcategory || item.Subcategory || '';
-          var comment = item.comment || item.Comment || item.note || item.Note || '';
-
-          if (!date || isNaN(Date.parse(date)) || isNaN(amount) || amount <= 0) {
-            skippedCount++;
-            return;
+    // 2. Extract embedded payload from PDF marker comments
+    if (!json) {
+      var startMarker = '%=== EXPENSE_TRACKER_PDF_DATA_START ===%';
+      var endMarker = '%=== EXPENSE_TRACKER_PDF_DATA_END ===%';
+      var sIdx = text.lastIndexOf(startMarker);
+      if (sIdx !== -1) {
+        var eIdx = text.indexOf(endMarker, sIdx + startMarker.length);
+        if (eIdx !== -1) {
+          var rawBase64 = text.substring(sIdx + startMarker.length, eIdx);
+          var cleanBase64 = rawBase64.replace(/[% \r\n\t]/g, '');
+          if (cleanBase64) {
+            try {
+              var decodedStr = decodeURIComponent(Array.prototype.map.call(atob(cleanBase64), function (c) {
+                return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+              }).join(''));
+              json = JSON.parse(decodedStr);
+            } catch (err1) {
+              try {
+                json = JSON.parse(atob(cleanBase64));
+              } catch (err2) {
+                console.error('PDF payload parse error:', err2);
+              }
+            }
           }
-
-          var formattedDate = new Date(date).toISOString().split('T')[0];
-
-          parsedExpenses.push({
-            id: item.id || uid(),
-            amount: amount,
-            categoryId: catId,
-            categoryName: typeof catName === 'string' ? catName.trim() : '',
-            subcategory: typeof subcat === 'string' ? subcat.trim() : '',
-            date: formattedDate,
-            comment: typeof comment === 'string' ? comment.trim() : '',
-            createdAt: item.createdAt || new Date().toISOString()
-          });
-        });
-      } catch (err) {
-        return null;
-      }
-    } else {
-      var lines = text.split(/\r?\n/).filter(function (l) { return l.trim().length > 0; });
-      if (lines.length < 2) return null;
-
-      var headers = parseCSVLine(lines[0]).map(function (h) { return h.trim().toLowerCase(); });
-      var idxDate = headers.findIndex(function (h) { return h === 'date'; });
-      var idxCat = headers.findIndex(function (h) { return h === 'category'; });
-      var idxSub = headers.findIndex(function (h) { return h === 'subcategory'; });
-      var idxAmt = headers.findIndex(function (h) { return h === 'amount'; });
-      var idxComment = headers.findIndex(function (h) { return h === 'comment' || h === 'note'; });
-
-      if (idxDate === -1 || idxAmt === -1) return null;
-
-      for (var i = 1; i < lines.length; i++) {
-        var row = parseCSVLine(lines[i]);
-        if (row.length === 0) continue;
-
-        var rawDate = row[idxDate];
-        var rawAmt = row[idxAmt];
-        var rawCat = idxCat !== -1 ? row[idxCat] : 'General';
-        var rawSub = idxSub !== -1 ? row[idxSub] : '';
-        var rawComment = idxComment !== -1 ? row[idxComment] : '';
-
-        var amount = parseFloat(rawAmt);
-        if (!rawDate || isNaN(Date.parse(rawDate)) || isNaN(amount) || amount <= 0) {
-          skippedCount++;
-          continue;
         }
-
-        var formattedDate = new Date(rawDate).toISOString().split('T')[0];
-
-        parsedExpenses.push({
-          id: uid(),
-          amount: amount,
-          categoryName: (rawCat || 'General').trim(),
-          subcategory: (rawSub || '').trim(),
-          date: formattedDate,
-          comment: (rawComment || '').trim(),
-          createdAt: new Date().toISOString()
-        });
       }
     }
 
+    if (!json || typeof json !== 'object') return null;
+
+    var rawExpenses = Array.isArray(json.expenses) ? json.expenses : [];
+    var parsedCategories = Array.isArray(json.categories) ? json.categories : [];
+    var validExpenses = [];
+    var skippedCount = 0;
+
+    rawExpenses.forEach(function (item) {
+      var date = item.date || item.Date;
+      var rawAmount = item.amount !== undefined ? item.amount : item.Amount;
+      var amount = parseFloat(rawAmount);
+      var catName = item.category || item.Category || item.categoryName || '';
+      var catId = item.categoryId || '';
+      var subcat = item.subcategory || item.Subcategory || '';
+      var comment = item.comment || item.Comment || item.note || item.Note || '';
+
+      if (!date || isNaN(Date.parse(date)) || isNaN(amount) || amount <= 0 || !isFinite(amount)) {
+        skippedCount++;
+        return;
+      }
+
+      var formattedDate = new Date(date).toISOString().split('T')[0];
+
+      validExpenses.push({
+        id: item.id || uid(),
+        amount: Math.round(amount * 100) / 100,
+        categoryId: catId,
+        categoryName: typeof catName === 'string' ? catName.trim() : '',
+        subcategory: typeof subcat === 'string' ? subcat.trim() : '',
+        date: formattedDate,
+        comment: typeof comment === 'string' ? comment.trim().slice(0, 500) : '',
+        createdAt: item.createdAt || new Date().toISOString()
+      });
+    });
+
     return {
-      expenses: parsedExpenses,
+      expenses: validExpenses,
       categories: parsedCategories,
       skippedCount: skippedCount
     };
-  }
-
-  function parseCSVLine(line) {
-    var result = [];
-    var current = '';
-    var inQuotes = false;
-    for (var i = 0; i < line.length; i++) {
-      var c = line[i];
-      if (c === '"') {
-        inQuotes = !inQuotes;
-      } else if (c === ',' && !inQuotes) {
-        result.push(current);
-        current = '';
-      } else {
-        current += c;
-      }
-    }
-    result.push(current);
-    return result.map(function(s) { return s.replace(/^"|"$/g, '').trim(); });
   }
 
   function openImportModal() {
@@ -1607,7 +1792,7 @@
     pendingImportData = null;
   }
 
-  function executeImport(mode) {
+  async function executeImport(mode) {
     if (!pendingImportData) return;
 
     var importedExp = pendingImportData.expenses;
@@ -1653,6 +1838,7 @@
     }
 
     var addedCount = 0;
+    var duplicateCount = 0;
 
     importedExp.forEach(function (exp) {
       var finalCatId = resolveCatId(exp.categoryId, exp.categoryName);
@@ -1666,7 +1852,10 @@
                  (existing.subcategory || '').toLowerCase() === (exp.subcategory || '').toLowerCase() &&
                  (existing.comment || '').toLowerCase() === (exp.comment || '').toLowerCase();
         });
-        if (isDuplicate) return;
+        if (isDuplicate) {
+          duplicateCount++;
+          return;
+        }
       }
 
       saveSubcategoryFromExpense(finalCatId, exp.subcategory);
@@ -1685,10 +1874,14 @@
       addedCount++;
     });
 
-    saveData();
+    await saveData();
     refreshAll();
     closeImportModal();
-    showToast(addedCount + ' imported' + (skippedCount > 0 ? ', ' + skippedCount + ' skipped' : ''), 'success');
+
+    var msg = addedCount + ' expense(s) imported';
+    if (duplicateCount > 0) msg += ' (' + duplicateCount + ' duplicate(s) skipped)';
+    if (skippedCount > 0) msg += ' (' + skippedCount + ' bad row(s) skipped)';
+    showToast(msg, 'success');
   }
 
   /* ================================================================
@@ -1701,12 +1894,30 @@
     var links = nav.querySelectorAll('.nav-link');
     var hamburger = dom.hamburgerToggle;
 
+    function closeNav() {
+      header.classList.remove('nav-open');
+      if (hamburger) hamburger.setAttribute('aria-expanded', 'false');
+    }
+
     if (hamburger) {
-      hamburger.addEventListener('click', function () {
+      hamburger.addEventListener('click', function (e) {
+        e.stopPropagation();
         var isOpen = header.classList.toggle('nav-open');
         hamburger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
       });
     }
+
+    document.addEventListener('click', function (e) {
+      if (header.classList.contains('nav-open') && !header.contains(e.target)) {
+        closeNav();
+      }
+    });
+
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && header.classList.contains('nav-open')) {
+        closeNav();
+      }
+    });
 
     links.forEach(function (link) {
       link.addEventListener('click', function (e) {
@@ -1714,8 +1925,7 @@
         var section = document.getElementById(targetId);
         if (section) {
           e.preventDefault();
-          header.classList.remove('nav-open');
-          if (hamburger) hamburger.setAttribute('aria-expanded', 'false');
+          closeNav();
 
           section.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
@@ -1763,7 +1973,6 @@
     updateDashboard();
     renderPieChart();
     renderLineChart();
-    renderHeatmap();
     generateInsights();
   }
 
@@ -1785,6 +1994,31 @@
       el.addEventListener('input', function () { el.classList.remove('input-error'); });
       el.addEventListener('change', function () { el.classList.remove('input-error'); });
     });
+
+    // Limit amount to maximum of 10 digits in logic
+    dom.expenseAmount.addEventListener('input', function () {
+      var val = dom.expenseAmount.value;
+      if (!val) return;
+      var parts = val.split('.');
+      var intPart = parts[0].replace(/\D/g, '');
+      if (intPart.length > 10) {
+        var truncatedInt = intPart.slice(0, 10);
+        dom.expenseAmount.value = parts.length > 1 ? truncatedInt + '.' + parts.slice(1).join('') : truncatedInt;
+        showToast('Maximum 10 digits allowed for amount', 'warning');
+      }
+    });
+
+    // Make sure we cannot select future date in internal logic
+    function enforceMaxDate() {
+      var today = todayStr();
+      dom.expenseDate.max = today;
+      if (dom.expenseDate.value && dom.expenseDate.value > today) {
+        dom.expenseDate.value = today;
+        showToast('Future dates are not allowed', 'warning');
+      }
+    }
+    dom.expenseDate.addEventListener('input', enforceMaxDate);
+    dom.expenseDate.addEventListener('change', enforceMaxDate);
 
     dom.expenseCategory.addEventListener('change', handleCategoryChange);
 
@@ -1820,10 +2054,10 @@
 
     dom.filterCategory.addEventListener('change', renderExpenses);
     dom.exportPdfBtn.addEventListener('click', generatePDF);
-    dom.exportJsonBtn.addEventListener('click', exportJSON);
     dom.importBtn.addEventListener('click', handleImportClick);
     dom.importFileInput.addEventListener('change', handleImportFileSelect);
 
+    // Import modal controls
     dom.closeImportModalBtn.addEventListener('click', closeImportModal);
     dom.importMergeBtn.addEventListener('click', function () { executeImport('merge'); });
     dom.importReplaceBtn.addEventListener('click', function () { executeImport('replace'); });
@@ -1832,8 +2066,8 @@
     });
 
     document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape' && !dom.importModal.classList.contains('hidden')) {
-        closeImportModal();
+      if (e.key === 'Escape') {
+        if (dom.importModal && !dom.importModal.classList.contains('hidden')) closeImportModal();
       }
     });
 
@@ -1861,11 +2095,11 @@
       amountDaily: $('amountDaily'), amountWeekly: $('amountWeekly'),
       amountMonthly: $('amountMonthly'), amountYearly: $('amountYearly'),
       pieChartCanvas: $('pieChart'), lineChartCanvas: $('lineChart'),
-      insightsContainer: $('insightsContainer'), heatmapGrid: $('heatmapGrid'),
+      insightsContainer: $('insightsContainer'),
       expenseTableBody: $('expenseTableBody'), expenseTableWrapper: $('expenseTableWrapper'),
       expenseCards: $('expenseCards'), emptyState: $('emptyState'),
       filterCategory: $('filterCategory'), exportPdfBtn: $('exportPdfBtn'),
-      exportJsonBtn: $('exportJsonBtn'), importBtn: $('importBtn'), importFileInput: $('importFileInput'),
+      importBtn: $('importBtn'), importFileInput: $('importFileInput'),
       importModal: $('importModal'), closeImportModalBtn: $('closeImportModalBtn'),
       importSummaryText: $('importSummaryText'), importMergeBtn: $('importMergeBtn'),
       importReplaceBtn: $('importReplaceBtn'),
@@ -1886,6 +2120,7 @@
 
     await loadData();
     dom.expenseDate.value = todayStr();
+    dom.expenseDate.max = todayStr();
     applyTheme(data.settings.theme);
 
     refreshAll();

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Expense Tracker</title>
   <link rel="stylesheet" href="style.css">
 <!-- extra -->
@@ -19,26 +19,27 @@
 </head>
 <body>
 
-          <header class="app-header" id="appHeader">
-    <button class="hamburger-toggle" id="hamburgerToggle" type="button" aria-label="Toggle navigation menu" aria-expanded="false">
-      <span class="hamburger-bar"></span>
-      <span class="hamburger-bar"></span>
-      <span class="hamburger-bar"></span>
-    </button>
-    <h1 class="app-title" id="appTitle">Expense Tracker</h1>
-    <nav class="header-nav" id="headerNav" aria-label="Section navigation">
-      <a href="#expenseFormSection" class="nav-link active" data-target="expenseFormSection">Add Expense</a>
-      <a href="#categorySection" class="nav-link" data-target="categorySection">Categories</a>
-      <a href="#dashboardSection" class="nav-link" data-target="dashboardSection">Dashboard</a>
-      <a href="#chartsSection" class="nav-link" data-target="chartsSection">Charts</a>
-      <a href="#insightsSection" class="nav-link" data-target="insightsSection">Insights</a>
-      <a href="#heatmapSection" class="nav-link" data-target="heatmapSection">Heatmap</a>
-      <a href="#expenseListSection" class="nav-link" data-target="expenseListSection">All Expenses</a>
-    </nav>
-    <div class="header-separator"></div>
-    <button class="dark-mode-toggle" id="darkModeToggle" type="button" aria-label="Toggle dark mode">
-      <span class="toggle-icon" id="toggleIcon">&#9790;</span>
-    </button>
+  <header class="app-header" id="appHeader">
+    <div class="header-inner">
+      <button class="hamburger-toggle" id="hamburgerToggle" type="button" aria-label="Toggle navigation menu" aria-expanded="false">
+        <span class="hamburger-bar"></span>
+        <span class="hamburger-bar"></span>
+        <span class="hamburger-bar"></span>
+      </button>
+      <h1 class="app-title" id="appTitle">Expense Tracker</h1>
+      <nav class="header-nav" id="headerNav" aria-label="Section navigation">
+        <a href="#expenseFormSection" class="nav-link active" data-target="expenseFormSection">Add Expense</a>
+        <a href="#categorySection" class="nav-link" data-target="categorySection">Categories</a>
+        <a href="#dashboardSection" class="nav-link" data-target="dashboardSection">Dashboard</a>
+        <a href="#chartsSection" class="nav-link" data-target="chartsSection">Charts</a>
+        <a href="#insightsSection" class="nav-link" data-target="insightsSection">Insights</a>
+        <a href="#expenseListSection" class="nav-link" data-target="expenseListSection">All Expenses</a>
+      </nav>
+      <div class="header-separator"></div>
+      <button class="dark-mode-toggle" id="darkModeToggle" type="button" aria-label="Toggle dark mode">
+        <span class="toggle-icon" id="toggleIcon">&#9790;</span>
+      </button>
+    </div>
   </header>
 
   <main class="app-main" id="appMain">
@@ -81,7 +82,9 @@
             <span class="char-counter" id="noteCharCounter">0/500</span>
           </div>
         </div>
-        <button type="submit" class="btn btn-primary" id="addExpenseBtn">Add Expense</button>
+        <div class="form-actions" id="expenseFormActions">
+          <button type="submit" class="btn btn-primary" id="addExpenseBtn">Add Expense</button>
+        </div>
       </form>
     </section>
 
@@ -89,15 +92,17 @@
     <section class="section category-section" id="categorySection" aria-labelledby="categoryTitle">
       <h2 class="section-title" id="categoryTitle">Manage Categories</h2>
       <div class="category-form" id="categoryForm">
-        <div class="form-group">
+        <div class="form-group category-name-group">
           <label for="categoryNameInput">Category Name</label>
           <input type="text" id="categoryNameInput" class="form-input" placeholder="e.g. Food, Transport">
         </div>
-        <div class="form-group">
+        <div class="form-group category-color-group">
           <label for="categoryColorPicker">Color</label>
           <input type="color" id="categoryColorPicker" class="form-input color-input" value="#4f46e5">
         </div>
-        <button type="button" class="btn btn-secondary" id="addCategoryBtn">Add Category</button>
+        <div class="category-actions-group">
+          <button type="button" class="btn btn-secondary" id="addCategoryBtn">Add Category</button>
+        </div>
       </div>
       <ul class="category-list" id="categoryList" aria-label="List of categories">
         <!-- Dynamically populated -->
@@ -150,26 +155,7 @@
       </div>
     </section>
 
-    <!-- Heatmap Section -->
-    <section class="section heatmap-section" id="heatmapSection" aria-labelledby="heatmapTitle">
-      <h2 class="section-title" id="heatmapTitle">Spending Heatmap</h2>
-      <div class="heatmap-wrapper">
-        <div class="heatmap-grid" id="heatmapGrid">
-          <!-- Dynamically populated heatmap cells -->
-        </div>
-      </div>
-      <div class="heatmap-legend" id="heatmapLegend">
-        <span class="legend-label">Less</span>
-        <div class="legend-cells">
-          <span class="legend-cell level-0"></span>
-          <span class="legend-cell level-1"></span>
-          <span class="legend-cell level-2"></span>
-          <span class="legend-cell level-3"></span>
-          <span class="legend-cell level-4"></span>
-        </div>
-        <span class="legend-label">More</span>
-      </div>
-    </section>
+
 
     <!-- Expense List Section -->
     <section class="section expense-list-section" id="expenseListSection" aria-labelledby="expenseListTitle">
@@ -184,9 +170,8 @@
           </div>
           <div class="expense-actions-group">
             <button type="button" class="btn btn-export" id="exportPdfBtn">Export PDF</button>
-            <button type="button" class="btn btn-secondary" id="exportJsonBtn">Export JSON</button>
             <button type="button" class="btn btn-secondary" id="importBtn">Import</button>
-            <input type="file" id="importFileInput" accept=".json,.csv" class="sr-only" aria-label="Import file">
+            <input type="file" id="importFileInput" accept=".pdf,application/pdf,.json,application/json" class="sr-only" aria-label="Import PDF or backup file">
           </div>
         </div>
         <div class="expense-table-wrapper" id="expenseTableWrapper">
@@ -233,6 +218,8 @@
       </div>
     </div>
   </div>
+
+
 
   <footer class="app-footer" id="appFooter">
     <p class="footer-text">Personal Expense Tracker &mdash; All data stored locally in your browser.</p>

@@ -1,12 +1,13 @@
-const CACHE_NAME = "expense-tracker-v1";
+const CACHE_NAME = "expense-tracker-v6";
 
 const FILES_TO_CACHE = [
     "./",
     "./index.html",
     "./style.css",
     "./script.js",
-    "./data.json",
-    "./manifest.json"
+    "./manifest.json",
+    "./icon-192.png",
+    "./icon-512.png"
 ];
 
 self.addEventListener("install", event => {
@@ -15,6 +16,7 @@ self.addEventListener("install", event => {
             return cache.addAll(FILES_TO_CACHE);
         })
     );
+    self.skipWaiting();
 });
 
 self.addEventListener("activate", event => {
@@ -27,12 +29,24 @@ self.addEventListener("activate", event => {
             )
         )
     );
+    self.clients.claim();
 });
 
 self.addEventListener("fetch", event => {
     event.respondWith(
         caches.match(event.request).then(cachedResponse => {
-            return cachedResponse || fetch(event.request);
+            if (cachedResponse) {
+                return cachedResponse;
+            }
+            return fetch(event.request).then(networkResponse => {
+                if (networkResponse && networkResponse.status === 200 && event.request.method === "GET") {
+                    const responseClone = networkResponse.clone();
+                    caches.open(CACHE_NAME).then(cache => {
+                        cache.put(event.request, responseClone);
+                    });
+                }
+                return networkResponse;
+            }).catch(() => cachedResponse);
         })
     );
 });
