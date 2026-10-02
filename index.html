@@ -168,10 +168,77 @@
       <div class="expense-list-wrapper" id="expenseListWrapper">
         <div class="expense-list-header" id="expenseListHeader">
           <div class="expense-filter" id="expenseFilter">
-            <label for="filterCategory" class="sr-only">Filter by category</label>
-            <select id="filterCategory" class="form-input">
-              <option value="all">All Categories</option>
-            </select>
+            <div class="filter-item">
+              <label for="filterCategory" class="sr-only">Filter by category</label>
+              <select id="filterCategory" class="form-input">
+                <option value="all">All Categories</option>
+              </select>
+            </div>
+            <div class="filter-item filter-date-item" id="filterDateContainer">
+              <label for="filterDate" class="sr-only">Filter by date</label>
+              <div class="filter-date-wrapper">
+                <select id="filterDate" class="form-input">
+                  <option value="all" selected>All</option>
+                  <option value="this-month">This Month</option>
+                  <option value="previous-month">Previous Month</option>
+                  <option value="by-date">By Date</option>
+                </select>
+                <button type="button" class="btn-clear-date hidden" id="clearDateFilterBtn" title="Reset date filter to All" aria-label="Reset date filter to All">&times;</button>
+              </div>
+
+              <!-- Date Picker Popover for By Date -->
+              <div class="date-picker-popover hidden" id="datePickerPopover" role="dialog" aria-modal="false" aria-labelledby="datePickerTitle">
+                <div class="popover-header">
+                  <span class="popover-title" id="datePickerTitle">Filter by Date</span>
+                  <button type="button" class="popover-close-btn" id="closeDatePickerBtn" aria-label="Close date picker">&times;</button>
+                </div>
+
+                <div class="date-picker-tabs" role="tablist">
+                  <button type="button" class="tab-btn active" id="tabRangeBtn" role="tab" aria-selected="true" aria-controls="rangeInputsGroup">Date Range</button>
+                  <button type="button" class="tab-btn" id="tabSingleBtn" role="tab" aria-selected="false" aria-controls="singleInputGroup">Single Date</button>
+                </div>
+
+                <!-- Range Inputs -->
+                <div class="popover-inputs" id="rangeInputsGroup" role="tabpanel">
+                  <div class="popover-input-group">
+                    <label for="filterStartDate">From</label>
+                    <input type="date" id="filterStartDate" class="form-input date-input-sm">
+                  </div>
+                  <div class="popover-input-group">
+                    <label for="filterEndDate">To</label>
+                    <input type="date" id="filterEndDate" class="form-input date-input-sm">
+                  </div>
+                </div>
+
+                <!-- Single Date Input -->
+                <div class="popover-inputs hidden" id="singleInputGroup" role="tabpanel">
+                  <div class="popover-input-group">
+                    <label for="filterSingleDate">Date</label>
+                    <input type="date" id="filterSingleDate" class="form-input date-input-sm">
+                  </div>
+                </div>
+
+                <!-- Quick Presets -->
+                <div class="date-presets" id="datePresets">
+                  <button type="button" class="preset-chip" data-preset="today">Today</button>
+                  <button type="button" class="preset-chip" data-preset="yesterday">Yesterday</button>
+                  <button type="button" class="preset-chip" data-preset="last7">Last 7 Days</button>
+                  <button type="button" class="preset-chip" data-preset="last30">Last 30 Days</button>
+                </div>
+
+                <!-- Popover Footer -->
+                <div class="popover-footer">
+                  <button type="button" class="btn btn-secondary btn-sm" id="resetCustomDateBtn">Clear</button>
+                  <button type="button" class="btn btn-primary btn-sm" id="applyCustomDateBtn">Done</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Active date summary chip -->
+            <button type="button" class="date-active-chip hidden" id="dateActiveChip" title="Click to edit custom date">
+              <span class="chip-icon">&#128197;</span>
+              <span class="chip-text" id="dateActiveChipText"></span>
+            </button>
           </div>
           <div class="expense-actions-group">
             <button type="button" class="btn btn-export" id="exportPdfBtn">Export PDF</button>

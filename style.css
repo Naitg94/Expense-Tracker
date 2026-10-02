@@ -782,8 +782,247 @@ select.form-input {
   gap: 8px;
 }
 
-.expense-filter .form-input {
-  max-width: 240px;
+.expense-filter {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.expense-filter .filter-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.filter-date-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.expense-filter select.form-input {
+  width: auto;
+  min-width: 135px;
+  max-width: 220px;
+}
+
+.btn-clear-date {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  margin-left: 8px;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.btn-clear-date:hover {
+  background: var(--danger-light);
+  color: var(--danger);
+  border-color: var(--danger);
+  transform: scale(1.08);
+}
+
+.btn-clear-date.hidden {
+  display: none !important;
+}
+
+.date-active-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  font-family: inherit;
+  color: var(--accent);
+  background: var(--accent-light);
+  border: 1px solid var(--accent);
+  border-radius: 20px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.date-active-chip:hover {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.date-active-chip.hidden {
+  display: none !important;
+}
+
+/* Date Picker Popover */
+.date-picker-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 100;
+  width: 310px;
+  background-color: var(--bg-secondary);
+  border: 1.5px solid var(--border);
+  border-radius: var(--card-radius);
+  box-shadow: var(--shadow-lg);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: popoverFadeIn 0.2s ease-out forwards;
+}
+
+@keyframes popoverFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.date-picker-popover.hidden {
+  display: none !important;
+}
+
+.popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.popover-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.popover-close-btn {
+  background: transparent;
+  border: none;
+  font-size: 1.25rem;
+  line-height: 1;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+  transition: color 0.2s, background-color 0.2s;
+}
+
+.popover-close-btn:hover {
+  color: var(--text-primary);
+  background-color: var(--bg-tertiary);
+}
+
+.date-picker-tabs {
+  display: flex;
+  background-color: var(--bg-tertiary);
+  padding: 3px;
+  border-radius: 8px;
+  gap: 4px;
+}
+
+.date-picker-tabs .tab-btn {
+  flex: 1;
+  padding: 6px 10px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.date-picker-tabs .tab-btn.active {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.popover-inputs {
+  display: flex;
+  gap: 10px;
+}
+
+.popover-inputs.hidden {
+  display: none !important;
+}
+
+.popover-input-group {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.popover-input-group label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.date-input-sm {
+  padding: 8px 10px;
+  font-size: 0.85rem;
+  color-scheme: light;
+}
+
+.dark input[type="date"],
+.dark .date-input-sm {
+  color-scheme: dark;
+}
+
+.date-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.preset-chip {
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  font-family: inherit;
+  background-color: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.preset-chip:hover {
+  background-color: var(--accent-light);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.popover-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.btn-sm {
+  padding: 6px 14px;
+  font-size: 0.825rem;
 }
 
 .table-note-line {
@@ -1520,6 +1759,34 @@ select.form-input {
     display: none;
   }
 
+  .expense-filter {
+    width: 100%;
+  }
+
+  .expense-filter .filter-item {
+    flex: 1 1 calc(50% - 6px);
+    min-width: 130px;
+  }
+
+  .expense-filter select.form-input {
+    width: 100%;
+    max-width: none;
+  }
+
+  .filter-date-wrapper {
+    width: 100%;
+  }
+
+  .date-picker-popover {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: calc(100vw - 32px);
+    max-width: 320px;
+    z-index: 1000;
+  }
+
   .expense-actions-group {
     width: 100%;
   }
@@ -1629,9 +1896,10 @@ select.form-input {
     justify-content: space-between;
   }
 
-  .expense-filter .form-input {
+  .expense-filter select.form-input {
     width: auto;
-    max-width: 240px;
+    min-width: 140px;
+    max-width: 220px;
   }
 
   .expense-actions-group {

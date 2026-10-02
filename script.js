@@ -881,12 +881,213 @@
   }
 
   /* ================================================================
+     DATE FILTER MANAGEMENT
+     ================================================================ */
+  var dateFilterCustomMode = 'range'; // 'range' | 'single'
+
+  function getLocalDateStr(date) {
+    var d = date || new Date();
+    var year = d.getFullYear();
+    var month = String(d.getMonth() + 1).padStart(2, '0');
+    var day = String(d.getDate()).padStart(2, '0');
+    return year + '-' + month + '-' + day;
+  }
+
+  function formatDisplayDate(dateStr) {
+    if (!dateStr) return '';
+    var parts = dateStr.split('-');
+    if (parts.length !== 3) return dateStr;
+    var d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  function getActiveDateRange() {
+    if (!dom.filterDate) return null;
+    var val = dom.filterDate.value;
+    var now = new Date();
+
+    if (val === 'this-month') {
+      var start = getLocalDateStr(new Date(now.getFullYear(), now.getMonth(), 1));
+      var end = getLocalDateStr(now);
+      return { start: start, end: end, label: 'This Month' };
+    } else if (val === 'previous-month') {
+      var start = getLocalDateStr(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+      var end = getLocalDateStr(new Date(now.getFullYear(), now.getMonth(), 0));
+      return { start: start, end: end, label: 'Previous Month' };
+    } else if (val === 'by-date') {
+      if (dateFilterCustomMode === 'single') {
+        var d = dom.filterSingleDate ? dom.filterSingleDate.value : '';
+        if (!d) return null;
+        return { start: d, end: d, label: formatDisplayDate(d) };
+      } else {
+        var s = dom.filterStartDate ? dom.filterStartDate.value : '';
+        var e = dom.filterEndDate ? dom.filterEndDate.value : '';
+        if (!s && !e) return null;
+        var minD = (s && e) ? (s <= e ? s : e) : (s || e);
+        var maxD = (s && e) ? (s <= e ? e : s) : (e || s);
+        var label = (s && e) ? (formatDisplayDate(minD) + ' \u2013 ' + formatDisplayDate(maxD)) : formatDisplayDate(minD);
+        return { start: minD, end: maxD, label: label };
+      }
+    }
+    return null; // 'all'
+  }
+
+  function openDatePicker() {
+    if (!dom.datePickerPopover) return;
+    dom.datePickerPopover.classList.remove('hidden');
+    var today = getLocalDateStr();
+    if (dom.filterStartDate) dom.filterStartDate.max = today;
+    if (dom.filterEndDate) dom.filterEndDate.max = today;
+    if (dom.filterSingleDate) dom.filterSingleDate.max = today;
+  }
+
+  function closeDatePicker() {
+    if (dom.datePickerPopover) dom.datePickerPopover.classList.add('hidden');
+  }
+
+  function setCustomMode(mode) {
+    dateFilterCustomMode = mode;
+    if (mode === 'single') {
+      dom.tabSingleBtn.classList.add('active');
+      dom.tabSingleBtn.setAttribute('aria-selected', 'true');
+      dom.tabRangeBtn.classList.remove('active');
+      dom.tabRangeBtn.setAttribute('aria-selected', 'false');
+      dom.singleInputGroup.classList.remove('hidden');
+      dom.rangeInputsGroup.classList.add('hidden');
+      if (!dom.filterSingleDate.value) {
+        dom.filterSingleDate.value = dom.filterEndDate.value || dom.filterStartDate.value || getLocalDateStr();
+      }
+    } else {
+      dom.tabRangeBtn.classList.add('active');
+      dom.tabRangeBtn.setAttribute('aria-selected', 'true');
+      dom.tabSingleBtn.classList.remove('active');
+      dom.tabSingleBtn.setAttribute('aria-selected', 'false');
+      dom.rangeInputsGroup.classList.remove('hidden');
+      dom.singleInputGroup.classList.add('hidden');
+      if (!dom.filterStartDate.value) {
+        var now = new Date();
+        dom.filterStartDate.value = getLocalDateStr(new Date(now.getFullYear(), now.getMonth(), 1));
+      }
+      if (!dom.filterEndDate.value) {
+        dom.filterEndDate.value = getLocalDateStr();
+      }
+    }
+    updateActiveChip();
+    renderExpenses();
+  }
+
+  function updateActiveChip() {
+    if (!dom.dateActiveChip) return;
+    if (dom.filterDate.value === 'by-date') {
+      var range = getActiveDateRange();
+      if (range && range.label) {
+        dom.dateActiveChipText.textContent = range.label;
+        dom.dateActiveChip.classList.remove('hidden');
+      } else {
+        dom.dateActiveChip.classList.add('hidden');
+      }
+    } else {
+      dom.dateActiveChip.classList.add('hidden');
+    }
+  }
+
+  function updateClearBtnVisibility() {
+    if (!dom.clearDateFilterBtn || !dom.filterDate) return;
+    var isFiltered = dom.filterDate.value !== 'all';
+    dom.clearDateFilterBtn.classList.toggle('hidden', !isFiltered);
+  }
+
+  function resetDateFilter() {
+    if (dom.filterDate) dom.filterDate.value = 'all';
+    if (dom.filterSingleDate) dom.filterSingleDate.value = '';
+    if (dom.filterStartDate) dom.filterStartDate.value = '';
+    if (dom.filterEndDate) dom.filterEndDate.value = '';
+    closeDatePicker();
+    updateActiveChip();
+    updateClearBtnVisibility();
+    renderExpenses();
+  }
+
+  function handleDateFilterChange() {
+    var val = dom.filterDate.value;
+    if (val === 'by-date') {
+      if (dateFilterCustomMode === 'range') {
+        if (!dom.filterStartDate.value) {
+          var now = new Date();
+          dom.filterStartDate.value = getLocalDateStr(new Date(now.getFullYear(), now.getMonth(), 1));
+        }
+        if (!dom.filterEndDate.value) {
+          dom.filterEndDate.value = getLocalDateStr();
+        }
+      } else {
+        if (!dom.filterSingleDate.value) {
+          dom.filterSingleDate.value = getLocalDateStr();
+        }
+      }
+      openDatePicker();
+      updateActiveChip();
+      renderExpenses();
+    } else {
+      closeDatePicker();
+      updateActiveChip();
+      renderExpenses();
+    }
+    updateClearBtnVisibility();
+  }
+
+  function handleDatePreset(preset) {
+    var now = new Date();
+    if (preset === 'today') {
+      setCustomMode('single');
+      dom.filterSingleDate.value = getLocalDateStr(now);
+    } else if (preset === 'yesterday') {
+      setCustomMode('single');
+      var y = new Date();
+      y.setDate(y.getDate() - 1);
+      dom.filterSingleDate.value = getLocalDateStr(y);
+    } else if (preset === 'last7') {
+      setCustomMode('range');
+      var past = new Date();
+      past.setDate(past.getDate() - 6);
+      dom.filterStartDate.value = getLocalDateStr(past);
+      dom.filterEndDate.value = getLocalDateStr(now);
+    } else if (preset === 'last30') {
+      setCustomMode('range');
+      var past = new Date();
+      past.setDate(past.getDate() - 29);
+      dom.filterStartDate.value = getLocalDateStr(past);
+      dom.filterEndDate.value = getLocalDateStr(now);
+    }
+    updateActiveChip();
+    renderExpenses();
+  }
+
+  /* ================================================================
      EXPENSE RENDERING (TABLE & CARDS)
      ================================================================ */
   function renderExpenses() {
     var filterVal = dom.filterCategory.value;
+    var dateRange = getActiveDateRange();
+
     var filtered = data.expenses.slice();
     if (filterVal !== 'all') filtered = filtered.filter(function (e) { return e.categoryId === filterVal; });
+
+    if (dateRange) {
+      if (dateRange.start && dateRange.end) {
+        filtered = filtered.filter(function (e) {
+          return e.date >= dateRange.start && e.date <= dateRange.end;
+        });
+      } else if (dateRange.start) {
+        filtered = filtered.filter(function (e) {
+          return e.date >= dateRange.start;
+        });
+      } else if (dateRange.end) {
+        filtered = filtered.filter(function (e) {
+          return e.date <= dateRange.end;
+        });
+      }
+    }
+
     filtered.sort(function (a, b) {
       if (b.date !== a.date) return b.date.localeCompare(a.date);
       return (b.createdAt || '').localeCompare(a.createdAt || '');
@@ -2062,6 +2263,41 @@
     dom.subCatNameInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); dom.addSubCatBtn.click(); } });
 
     dom.filterCategory.addEventListener('change', renderExpenses);
+    if (dom.filterDate) {
+      dom.filterDate.addEventListener('change', handleDateFilterChange);
+      dom.filterDate.addEventListener('click', function () {
+        if (dom.filterDate.value === 'by-date' && dom.datePickerPopover && dom.datePickerPopover.classList.contains('hidden')) {
+          openDatePicker();
+        }
+      });
+    }
+    if (dom.clearDateFilterBtn) dom.clearDateFilterBtn.addEventListener('click', resetDateFilter);
+    if (dom.resetCustomDateBtn) dom.resetCustomDateBtn.addEventListener('click', resetDateFilter);
+    if (dom.closeDatePickerBtn) dom.closeDatePickerBtn.addEventListener('click', closeDatePicker);
+    if (dom.applyCustomDateBtn) dom.applyCustomDateBtn.addEventListener('click', closeDatePicker);
+    if (dom.tabRangeBtn) dom.tabRangeBtn.addEventListener('click', function () { setCustomMode('range'); });
+    if (dom.tabSingleBtn) dom.tabSingleBtn.addEventListener('click', function () { setCustomMode('single'); });
+    if (dom.dateActiveChip) dom.dateActiveChip.addEventListener('click', openDatePicker);
+
+    if (dom.filterStartDate) dom.filterStartDate.addEventListener('input', function () { updateActiveChip(); renderExpenses(); });
+    if (dom.filterEndDate) dom.filterEndDate.addEventListener('input', function () { updateActiveChip(); renderExpenses(); });
+    if (dom.filterSingleDate) dom.filterSingleDate.addEventListener('input', function () { updateActiveChip(); renderExpenses(); });
+
+    if (dom.datePresets) {
+      dom.datePresets.addEventListener('click', function (e) {
+        var chip = e.target.closest('.preset-chip');
+        if (chip && chip.dataset.preset) handleDatePreset(chip.dataset.preset);
+      });
+    }
+
+    document.addEventListener('click', function (e) {
+      if (dom.datePickerPopover && !dom.datePickerPopover.classList.contains('hidden')) {
+        if (dom.filterDateContainer && !dom.filterDateContainer.contains(e.target) && (!dom.dateActiveChip || !dom.dateActiveChip.contains(e.target))) {
+          closeDatePicker();
+        }
+      }
+    });
+
     dom.exportPdfBtn.addEventListener('click', generatePDF);
     dom.importBtn.addEventListener('click', handleImportClick);
     dom.importFileInput.addEventListener('change', handleImportFileSelect);
@@ -2076,6 +2312,7 @@
 
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape') {
+        if (dom.datePickerPopover && !dom.datePickerPopover.classList.contains('hidden')) closeDatePicker();
         if (dom.importModal && !dom.importModal.classList.contains('hidden')) closeImportModal();
       }
     });
@@ -2108,6 +2345,15 @@
       expenseTableBody: $('expenseTableBody'), expenseTableWrapper: $('expenseTableWrapper'),
       expenseCards: $('expenseCards'), emptyState: $('emptyState'),
       filterCategory: $('filterCategory'), exportPdfBtn: $('exportPdfBtn'),
+      filterDate: $('filterDate'), filterDateContainer: $('filterDateContainer'),
+      clearDateFilterBtn: $('clearDateFilterBtn'),
+      datePickerPopover: $('datePickerPopover'), closeDatePickerBtn: $('closeDatePickerBtn'),
+      tabRangeBtn: $('tabRangeBtn'), tabSingleBtn: $('tabSingleBtn'),
+      rangeInputsGroup: $('rangeInputsGroup'), singleInputGroup: $('singleInputGroup'),
+      filterStartDate: $('filterStartDate'), filterEndDate: $('filterEndDate'),
+      filterSingleDate: $('filterSingleDate'), datePresets: $('datePresets'),
+      resetCustomDateBtn: $('resetCustomDateBtn'), applyCustomDateBtn: $('applyCustomDateBtn'),
+      dateActiveChip: $('dateActiveChip'), dateActiveChipText: $('dateActiveChipText'),
       importBtn: $('importBtn'), importFileInput: $('importFileInput'),
       importModal: $('importModal'), closeImportModalBtn: $('closeImportModalBtn'),
       importSummaryText: $('importSummaryText'), importMergeBtn: $('importMergeBtn'),
